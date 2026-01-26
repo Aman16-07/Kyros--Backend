@@ -186,7 +186,7 @@ async def get_workflow_status(
 async def export_season_data(
     season_id: UUID,
     db: DBSession,
-    format: str = Query("json", regex="^(json|csv)$", description="Export format"),
+    format: str = Query("json", pattern="^(json|csv)$", description="Export format"),
 ) -> dict:
     """
     Export complete season data for reporting.

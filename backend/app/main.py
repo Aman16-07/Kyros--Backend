@@ -28,24 +28,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     - Shutdown: Dispose database connections
     """
     # Startup
+    app.state.db_connected = False
     try:
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
-        print(" Database connection verified")
+        print("✅ Database connection verified")
+        app.state.db_connected = True
     except Exception as e:
-        print(f" Database connection failed: {e}")
-        raise
+        print(f"⚠️  Database connection failed: {e}")
+        print("ℹ️  Server starting without database - endpoints requiring DB will fail")
+        # Don't raise - allow app to start for API docs viewing
     
     yield
     
     # Shutdown
-    await engine.dispose()
-    print(" Database connections closed")
+    try:
+        await engine.dispose()
+        print("🔌 Database connections closed")
+    except Exception:
+        pass
 
 
 # Initialize FastAPI application
 app = FastAPI(
-    title=settings.PROJECT_NAME,
+    title=settings.APP_NAME,
     description="""
     ## Kyros Backend API
     
@@ -63,7 +69,7 @@ app = FastAPI(
     - **Analytics**: Dashboard and reporting
     """,
     version="1.0.0",
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -72,7 +78,7 @@ app = FastAPI(
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -119,7 +125,7 @@ async def global_exception_handler(
 
 
 # Include API v1 router
-app.include_router(api_v1_router, prefix=settings.API_V1_STR)
+app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
 
 
 # Health check endpoints
@@ -128,7 +134,7 @@ async def root() -> dict:
     """Root endpoint - API status check."""
     return {
         "status": "healthy",
-        "service": settings.PROJECT_NAME,
+        "service": settings.APP_NAME,
         "version": "1.0.0",
     }
 
