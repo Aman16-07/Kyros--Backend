@@ -1,4 +1,162 @@
-"""OTB service placeholder."""
+"""OTB Plan service - business logic for OTB plans."""
 
-def otb_service():
-    pass
+from datetime import date
+from typing import Optional
+from uuid import UUID
+
+from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.workflow_guard import WorkflowGuard
+from app.models.otb_plan import OTBPlan
+from app.models.season import SeasonStatus
+from app.repositories.otb_repo import OTBPlanRepository
+from app.schemas.otb import OTBPlanCreate, OTBPlanUpdate, OTBSummary
+
+
+class OTBService:
+    """Service for OTB plan business logic."""
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+        self.repo = OTBPlanRepository(session)
+        self.guard = WorkflowGuard(session)
+    
+    async def create_otb_plan(self, data: OTBPlanCreate) -> OTBPlan:
+        """Create a new OTB plan."""
+        await self.guard.can_upload_otb(data.season_id)
+        
+        # Check for duplicate
+        existing = await self.repo.get_by_composite_key(
+            data.season_id,
+            data.location_id,
+            data.category_id,
+            data.month,
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="OTB plan already exists for this combination",
+            )
+        
+        plan = await self.repo.create(
+            season_id=data.season_id,
+            location_id=data.location_id,
+            category_id=data.category_id,
+            month=data.month.replace(day=1),  # Ensure first of month
+            approved_spend_limit=data.approved_spend_limit,
+            uploaded_by=data.uploaded_by,
+        )
+        
+        return plan
+    
+    async def bulk_create_otb_plans(
+        self,
+        plans: list[OTBPlanCreate],
+    ) -> list[OTBPlan]:
+        """Bulk create OTB plans."""
+        if not plans:
+            return []
+        
+        await self.guard.can_upload_otb(plans[0].season_id)
+        
+        created_plans = []
+        for plan_data in plans:
+            # Check for duplicate
+            existing = await self.repo.get_by_composite_key(
+                plan_data.season_id,
+                plan_data.location_id,
+                plan_data.category_id,
+                plan_data.month,
+            )
+            
+            if existing:
+                # Update existing
+                existing.approved_spend_limit = plan_data.approved_spend_limit
+                created_plans.append(existing)
+            else:
+                plan = await self.repo.create(
+                    season_id=plan_data.season_id,
+                    location_id=plan_data.location_id,
+                    category_id=plan_data.category_id,
+                    month=plan_data.month.replace(day=1),
+                    approved_spend_limit=plan_data.approved_spend_limit,
+                    uploaded_by=plan_data.uploaded_by,
+                )
+                created_plans.append(plan)
+        
+        # Update workflow
+        await self.guard.update_workflow_step(
+            plans[0].season_id,
+            "otb_uploaded",
+            SeasonStatus.OTB_UPLOADED,
+        )
+        
+        return created_plans
+    
+    async def get_otb_plan(self, plan_id: UUID) -> OTBPlan:
+        """Get an OTB plan by ID."""
+        plan = await self.repo.get_with_details(plan_id)
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="OTB plan not found",
+            )
+        return plan
+    
+    async def get_otb_plans_by_season(
+        self,
+        season_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[OTBPlan], int]:
+        """Get OTB plans for a season."""
+        plans = await self.repo.get_by_season(season_id, skip, limit)
+        total = await self.repo.count(season_id=season_id)
+        return plans, total
+    
+    async def get_otb_summary(self, season_id: UUID) -> list[OTBSummary]:
+        """Get OTB summary by month."""
+        summary_data = await self.repo.get_total_spend_by_month(season_id)
+        return [
+            OTBSummary(
+                month=item["month"],
+                total_spend_limit=item["total_spend_limit"],
+                location_count=item["location_count"],
+                category_count=item["category_count"],
+            )
+            for item in summary_data
+        ]
+    
+    async def update_otb_plan(
+        self,
+        plan_id: UUID,
+        data: OTBPlanUpdate,
+    ) -> OTBPlan:
+        """Update an OTB plan."""
+        plan = await self.repo.get_by_id(plan_id)
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="OTB plan not found",
+            )
+        
+        await self.guard.check_not_locked(plan.season_id)
+        
+        update_data = data.model_dump(exclude_unset=True)
+        updated_plan = await self.repo.update(plan_id, **update_data)
+        
+        return updated_plan
+    
+    async def delete_otb_plan(self, plan_id: UUID) -> bool:
+        """Delete an OTB plan."""
+        plan = await self.repo.get_by_id(plan_id)
+        if not plan:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="OTB plan not found",
+            )
+        
+        await self.guard.check_not_locked(plan.season_id)
+        
+        return await self.repo.delete(plan_id)
