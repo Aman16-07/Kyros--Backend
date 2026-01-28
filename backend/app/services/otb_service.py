@@ -1,6 +1,10 @@
-"""OTB Plan service - business logic for OTB plans."""
+"""OTB Plan service - business logic for OTB plans.
+
+OTB Formula: Planned Sales + Planned Closing Stock - Opening Stock - On Order
+"""
 
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -22,8 +26,21 @@ class OTBService:
         self.repo = OTBPlanRepository(session)
         self.guard = WorkflowGuard(session)
     
+    @staticmethod
+    def calculate_otb(
+        planned_sales: Decimal,
+        planned_closing_stock: Decimal,
+        opening_stock: Decimal,
+        on_order: Decimal,
+    ) -> Decimal:
+        """
+        Calculate OTB using the formula:
+        OTB = Planned Sales + Planned Closing Stock - Opening Stock - On Order
+        """
+        return planned_sales + planned_closing_stock - opening_stock - on_order
+    
     async def create_otb_plan(self, data: OTBPlanCreate) -> OTBPlan:
-        """Create a new OTB plan."""
+        """Create a new OTB plan with calculated approved_spend_limit."""
         await self.guard.can_upload_otb(data.season_id)
         
         # Check for duplicate
@@ -39,12 +56,24 @@ class OTBService:
                 detail="OTB plan already exists for this combination",
             )
         
+        # Calculate OTB using formula
+        approved_spend_limit = self.calculate_otb(
+            data.planned_sales,
+            data.planned_closing_stock,
+            data.opening_stock,
+            data.on_order,
+        )
+        
         plan = await self.repo.create(
             season_id=data.season_id,
             location_id=data.location_id,
             category_id=data.category_id,
             month=data.month.replace(day=1),  # Ensure first of month
-            approved_spend_limit=data.approved_spend_limit,
+            planned_sales=data.planned_sales,
+            planned_closing_stock=data.planned_closing_stock,
+            opening_stock=data.opening_stock,
+            on_order=data.on_order,
+            approved_spend_limit=approved_spend_limit,
             uploaded_by=data.uploaded_by,
         )
         
@@ -54,7 +83,7 @@ class OTBService:
         self,
         plans: list[OTBPlanCreate],
     ) -> list[OTBPlan]:
-        """Bulk create OTB plans."""
+        """Bulk create OTB plans with calculated OTB values."""
         if not plans:
             return []
         
@@ -62,6 +91,14 @@ class OTBService:
         
         created_plans = []
         for plan_data in plans:
+            # Calculate OTB using formula
+            approved_spend_limit = self.calculate_otb(
+                plan_data.planned_sales,
+                plan_data.planned_closing_stock,
+                plan_data.opening_stock,
+                plan_data.on_order,
+            )
+            
             # Check for duplicate
             existing = await self.repo.get_by_composite_key(
                 plan_data.season_id,
@@ -72,7 +109,11 @@ class OTBService:
             
             if existing:
                 # Update existing
-                existing.approved_spend_limit = plan_data.approved_spend_limit
+                existing.planned_sales = plan_data.planned_sales
+                existing.planned_closing_stock = plan_data.planned_closing_stock
+                existing.opening_stock = plan_data.opening_stock
+                existing.on_order = plan_data.on_order
+                existing.approved_spend_limit = approved_spend_limit
                 created_plans.append(existing)
             else:
                 plan = await self.repo.create(
@@ -80,17 +121,14 @@ class OTBService:
                     location_id=plan_data.location_id,
                     category_id=plan_data.category_id,
                     month=plan_data.month.replace(day=1),
-                    approved_spend_limit=plan_data.approved_spend_limit,
+                    planned_sales=plan_data.planned_sales,
+                    planned_closing_stock=plan_data.planned_closing_stock,
+                    opening_stock=plan_data.opening_stock,
+                    on_order=plan_data.on_order,
+                    approved_spend_limit=approved_spend_limit,
                     uploaded_by=plan_data.uploaded_by,
                 )
                 created_plans.append(plan)
-        
-        # Update workflow
-        await self.guard.update_workflow_step(
-            plans[0].season_id,
-            "otb_uploaded",
-            SeasonStatus.OTB_UPLOADED,
-        )
         
         return created_plans
     

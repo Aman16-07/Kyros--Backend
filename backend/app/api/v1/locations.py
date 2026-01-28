@@ -1,12 +1,17 @@
-"""Locations API endpoints."""
+"""Locations API endpoints.
+
+Locations are defined as part of the workflow Step 2.
+Each location gets an auto-generated 16-character unique location_code.
+"""
 
 from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 
 from app.core.deps import DBSession
-from app.models.location import LocationType
+from app.models.location import Location, LocationType
 from app.repositories.location_repo import LocationRepository
 from app.schemas.location import (
     LocationBulkCreate,
@@ -15,8 +20,15 @@ from app.schemas.location import (
     LocationResponse,
     LocationUpdate,
 )
+from app.utils.id_generators import generate_location_id
 
 router = APIRouter(prefix="/locations", tags=["Locations"])
+
+
+async def _get_existing_location_codes(db) -> set[str]:
+    """Get all existing location codes."""
+    result = await db.execute(select(Location.location_code))
+    return {row[0] for row in result.all() if row[0]}
 
 
 @router.post(
@@ -24,15 +36,27 @@ router = APIRouter(prefix="/locations", tags=["Locations"])
     response_model=LocationResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new location",
+    description="""
+    Create a new location with auto-generated location_code.
+    
+    Location code: 16-character unique alphanumeric (e.g., A7B3C9D1E5F2G8H4)
+    
+    This is part of Step 2 (Define Locations) in the workflow.
+    """,
 )
 async def create_location(
     data: LocationCreate,
     db: DBSession,
 ) -> LocationResponse:
-    """Create a new location."""
+    """Create a new location with auto-generated location_code."""
     repo = LocationRepository(db)
     
+    # Generate unique location code
+    existing_codes = await _get_existing_location_codes(db)
+    location_code = generate_location_id(existing_codes)
+    
     location = await repo.create(
+        location_code=location_code,
         name=data.name,
         type=data.type,
         cluster_id=data.cluster_id,
@@ -45,18 +69,35 @@ async def create_location(
     response_model=LocationListResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Bulk create locations",
+    description="""
+    Bulk create locations with auto-generated location_codes.
+    
+    Each location gets a unique 16-character alphanumeric code.
+    This is useful for defining multiple stores/warehouses at once.
+    """,
 )
 async def bulk_create_locations(
     data: LocationBulkCreate,
     db: DBSession,
 ) -> LocationListResponse:
-    """Bulk create locations."""
+    """Bulk create locations with auto-generated location_codes."""
     repo = LocationRepository(db)
     
-    locations = await repo.bulk_create([
-        {"name": loc.name, "type": loc.type, "cluster_id": loc.cluster_id}
-        for loc in data.locations
-    ])
+    # Generate unique codes for all locations
+    existing_codes = await _get_existing_location_codes(db)
+    
+    locations = []
+    for loc in data.locations:
+        location_code = generate_location_id(existing_codes)
+        existing_codes.add(location_code)  # Avoid duplicates in same batch
+        
+        location = await repo.create(
+            location_code=location_code,
+            name=loc.name,
+            type=loc.type,
+            cluster_id=loc.cluster_id,
+        )
+        locations.append(location)
     
     return LocationListResponse(
         items=[LocationResponse.model_validate(loc) for loc in locations],

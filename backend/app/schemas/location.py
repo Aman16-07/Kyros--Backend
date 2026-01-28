@@ -20,6 +20,7 @@ class LocationCreate(LocationBase):
     """Schema for creating a location."""
     
     cluster_id: Optional[UUID] = None
+    # location_code will be auto-generated (16-character unique ID)
 
 
 class LocationUpdate(BaseSchema):
@@ -33,6 +34,7 @@ class LocationUpdate(BaseSchema):
 class LocationResponse(LocationBase, UUIDSchema, TimestampSchema):
     """Schema for location response."""
     
+    location_code: str = Field(..., description="Unique 16-character location code")
     cluster_id: Optional[UUID] = None
 
 

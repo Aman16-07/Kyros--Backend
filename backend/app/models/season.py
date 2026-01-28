@@ -27,6 +27,10 @@ class Season(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     
     __tablename__ = "seasons"
     
+    # Custom readable ID in format XXXX-XXXX (e.g., F9J1-KKG2)
+    season_code: Mapped[str] = mapped_column(
+        String(9), unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)

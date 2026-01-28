@@ -1,14 +1,92 @@
-"""Analytics API endpoints for dashboard and reporting."""
+"""Analytics API endpoints for dashboard and reporting.
+
+READ-ONLY ANALYTICS VIEW
+These endpoints provide analytics and reporting for seasons.
+Available for all seasons, but LOCKED seasons are fully read-only.
+"""
 
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.deps import DBSession
 from app.services.analytics_service import AnalyticsService
+from app.services.workflow_orchestrator import WorkflowOrchestrator
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+
+@router.get(
+    "/read-only-view/{season_id}",
+    summary="Get complete read-only analytics view",
+    description="""
+    Get the complete read-only analytics view for a LOCKED season.
+    
+    This is the final step in the workflow - after a season is locked,
+    this endpoint provides comprehensive analytics including:
+    - Season Plan vs Actuals
+    - OTB vs Spend
+    - PO vs Plan
+    - GRN vs Plan
+    
+    NOTE: Season must be LOCKED for full analytics. Other statuses
+    will return partial data based on completed workflow steps.
+    """,
+)
+async def get_readonly_analytics_view(
+    season_id: UUID,
+    db: DBSession,
+) -> dict:
+    """Get complete read-only analytics view for a locked season."""
+    orchestrator = WorkflowOrchestrator(db)
+    analytics = AnalyticsService(db)
+    
+    # Get workflow status
+    workflow_status = await orchestrator.get_workflow_status(season_id)
+    
+    # Get all analytics data
+    dashboard = await analytics.get_dashboard_overview(season_id)
+    budget_vs_actual = await analytics.get_budget_vs_actual(season_id)
+    category_breakdown = await analytics.get_category_breakdown(season_id)
+    cluster_summary = await analytics.get_cluster_summary(season_id)
+    po_status = await analytics.get_po_status_breakdown(season_id)
+    price_band = await analytics.get_price_band_analysis(season_id)
+    
+    return {
+        "season_id": str(season_id),
+        "season_code": workflow_status.get("season_code"),
+        "season_name": workflow_status.get("season_name"),
+        "status": workflow_status.get("current_status"),
+        "is_locked": workflow_status.get("current_status") == "locked",
+        "is_editable": workflow_status.get("is_editable", True),
+        "analytics": {
+            "season_plan_vs_actuals": {
+                "planned_sales": dashboard.get("plans", {}).get("planned_sales"),
+                "actual_received": dashboard.get("grn", {}).get("total_received"),
+                "variance": (
+                    dashboard.get("plans", {}).get("planned_sales", 0) -
+                    dashboard.get("grn", {}).get("total_received", 0)
+                ),
+            },
+            "otb_vs_spend": budget_vs_actual,
+            "po_vs_plan": {
+                "total_budget": dashboard.get("otb", {}).get("total_budget"),
+                "total_po_value": dashboard.get("purchase_orders", {}).get("total_value"),
+                "budget_utilization": dashboard.get("purchase_orders", {}).get("budget_utilization"),
+            },
+            "grn_vs_plan": {
+                "total_po_value": dashboard.get("purchase_orders", {}).get("total_value"),
+                "total_received": dashboard.get("grn", {}).get("total_received"),
+                "fulfillment_rate": dashboard.get("grn", {}).get("fulfillment_rate"),
+            },
+            "category_breakdown": category_breakdown,
+            "cluster_summary": cluster_summary,
+            "po_status": po_status,
+            "price_band_analysis": price_band,
+        },
+        "workflow": workflow_status.get("workflow"),
+    }
 
 
 @router.get(

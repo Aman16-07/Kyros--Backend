@@ -30,6 +30,7 @@ class SeasonCreate(SeasonBase):
     """Schema for creating a season."""
     
     created_by: Optional[UUID] = None
+    # season_code will be auto-generated
 
 
 class SeasonUpdate(BaseSchema):
@@ -38,12 +39,13 @@ class SeasonUpdate(BaseSchema):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    status: Optional[SeasonStatus] = None
+    # status cannot be directly updated - must use workflow transitions
 
 
 class SeasonResponse(SeasonBase, UUIDSchema, TimestampSchema):
     """Schema for season response."""
     
+    season_code: str = Field(..., description="Unique season code in format XXXX-XXXX")
     status: SeasonStatus
     created_by: Optional[UUID] = None
 

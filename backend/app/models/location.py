@@ -22,6 +22,10 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     
     __tablename__ = "locations"
     
+    # Custom 16-character location code
+    location_code: Mapped[str] = mapped_column(
+        String(16), unique=True, nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[LocationType] = mapped_column(
         Enum(LocationType, name="location_type", create_type=True),
