@@ -4,8 +4,8 @@ import uuid
 from decimal import Decimal
 from typing import Any, Optional
 
-from sqlalchemy import ForeignKey, Numeric, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import ForeignKey, Numeric, UniqueConstraint, JSON
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
@@ -41,7 +41,7 @@ class RangeIntent(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
     )
     price_band_mix: Mapped[dict[str, Any]] = mapped_column(
-        JSONB,
+        JSON,
         nullable=False,
         default=dict,
     )

@@ -16,6 +16,7 @@ from sqlalchemy import text
 from app.api.v1.router import router as api_v1_router
 from app.core.config import settings
 from app.core.database import engine
+from app.models.base import Base
 
 
 @asynccontextmanager
@@ -24,12 +25,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Application lifespan manager.
     
     Handles startup and shutdown events:
-    - Startup: Verify database connection
+    - Startup: Create tables (SQLite) or verify database connection (PostgreSQL)
     - Shutdown: Dispose database connections
     """
     # Startup
     app.state.db_connected = False
     try:
+        # Create all tables (important for SQLite testing)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("✅ Database tables created/verified")
+        
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
         print("✅ Database connection verified")
