@@ -2,7 +2,14 @@
 # Kyros Backend - CURL API Test Script
 # Run: chmod +x curl_tests.sh && ./curl_tests.sh
 
-BASE_URL="http://localhost:8000"
+# Auto-detect host: use host.docker.internal for WSL, localhost otherwise
+if grep -qEi "(microsoft|wsl)" /proc/version 2>/dev/null; then
+  HOST="host.docker.internal"
+else
+  HOST="localhost"
+fi
+
+BASE_URL="http://$HOST:8000"
 API="$BASE_URL/api/v1"
 
 echo "============================================"
@@ -87,7 +94,8 @@ echo -e "  Season Code (XXXX-XXXX): $SEASON_CODE"
 echo -e "\n\033[1;33m6. WORKFLOW STEP 1: DEFINE LOCATIONS\033[0m"
 echo "------------------------------------"
 curl -s -X POST "$API/seasons/$SEASON_ID/define-locations" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{}'
 echo ""
 
 # ============================================
@@ -108,7 +116,8 @@ echo -e "\n  Plan ID: $PLAN_ID"
 echo -e "\n\033[1;33m8. WORKFLOW STEP 2: COMPLETE PLAN UPLOAD\033[0m"
 echo "----------------------------------------"
 curl -s -X POST "$API/seasons/$SEASON_ID/complete-plan-upload" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{}'
 echo ""
 
 # ============================================
@@ -128,7 +137,8 @@ echo -e "\n  OTB Calculation: 100000 + 50000 - 30000 - 10000 = 110000"
 echo -e "\n\033[1;33m10. WORKFLOW STEP 3: COMPLETE OTB UPLOAD\033[0m"
 echo "----------------------------------------"
 curl -s -X POST "$API/seasons/$SEASON_ID/complete-otb-upload" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{}'
 echo ""
 
 # ============================================
@@ -148,7 +158,8 @@ echo ""
 echo -e "\n\033[1;33m12. WORKFLOW STEP 4: COMPLETE RANGE UPLOAD\033[0m"
 echo "------------------------------------------"
 curl -s -X POST "$API/seasons/$SEASON_ID/complete-range-upload" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{}'
 echo ""
 
 # ============================================
@@ -180,7 +191,8 @@ echo ""
 echo -e "\n\033[1;33m15. WORKFLOW STEP 5: LOCK SEASON (Final)\033[0m"
 echo "----------------------------------------"
 curl -s -X POST "$API/seasons/$SEASON_ID/lock" \
-  -H "Content-Type: application/json"
+  -H "Content-Type: application/json" \
+  -d '{}'
 echo ""
 
 # ============================================

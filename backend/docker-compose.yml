@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: kyros-db
+    environment:
+      POSTGRES_USER: kyros
+      POSTGRES_PASSWORD: kyros
+      POSTGRES_DB: kyros
+    ports:
+      - "5432:5432"
+    volumes:
+      - kyros_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kyros -d kyros"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kyros-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://kyros:kyros@db:5432/kyros
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kyros_postgres_data:
