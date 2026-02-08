@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.season import SeasonStatus
+from app.models.season_plan import SeasonPlan
 from app.models.workflow import SeasonWorkflow
 from app.repositories.season_repo import SeasonRepository, WorkflowRepository
 
@@ -92,6 +93,14 @@ class WorkflowGuard:
         await self.check_season_exists(season_id)
         await self.check_not_locked(season_id)
         await self.check_locations_defined(season_id)
+        
+        # Check plan is not already finalized (immutable after complete-plan-upload)
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.plan_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Season plan is immutable - workflow has progressed past plan upload",
+            )
         return True
     
     async def can_upload_otb(self, season_id: UUID) -> bool:
@@ -99,6 +108,14 @@ class WorkflowGuard:
         await self.check_season_exists(season_id)
         await self.check_not_locked(season_id)
         await self.check_plan_uploaded(season_id)
+        
+        # Check OTB is not already finalized (immutable after complete-otb-upload)
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.otb_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="OTB plan is immutable - workflow has progressed past OTB upload",
+            )
         return True
     
     async def can_upload_range(self, season_id: UUID) -> bool:
@@ -106,6 +123,14 @@ class WorkflowGuard:
         await self.check_season_exists(season_id)
         await self.check_not_locked(season_id)
         await self.check_otb_uploaded(season_id)
+        
+        # Check range is not already finalized (immutable after complete-range-upload)
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.range_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Range intent is immutable - workflow has progressed past range upload",
+            )
         return True
     
     async def can_lock_season(self, season_id: UUID) -> bool:
@@ -120,6 +145,88 @@ class WorkflowGuard:
                 detail="Season is already locked",
             )
         return True
+    
+    async def can_ingest_po_grn(self, season_id: UUID) -> bool:
+        """Check if PO/GRN can be ingested for the season.
+        
+        PO/GRN can only be ingested after range intent is uploaded.
+        The season must be in RANGE_UPLOADED or LOCKED status.
+        """
+        await self.check_season_exists(season_id)
+        await self.check_range_uploaded(season_id)
+        return True
+    
+    async def check_plan_is_mutable(self, season_id: UUID, plan_id: Optional[UUID] = None, is_approved: bool = False) -> None:
+        """
+        Check if season plan can be modified (updated/deleted).
+        
+        Plan is mutable ONLY when:
+        - Season is not locked
+        - Workflow has NOT progressed past plan_uploaded step
+        - The individual plan is NOT approved (if plan_id provided)
+        """
+        await self.check_season_exists(season_id)
+        await self.check_not_locked(season_id)
+        
+        # Check if individual plan is approved - approved plans are IMMUTABLE
+        if is_approved:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This plan is approved and cannot be modified. Approved records are immutable.",
+            )
+        
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.plan_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Season plan is immutable - workflow has progressed past plan upload. No edits allowed.",
+            )
+    
+    async def check_otb_is_mutable(self, season_id: UUID) -> None:
+        """
+        Check if OTB plan can be modified (updated/deleted).
+        
+        OTB is mutable ONLY when:
+        - Season is not locked
+        - Workflow has NOT progressed past otb_uploaded step
+        """
+        await self.check_season_exists(season_id)
+        await self.check_not_locked(season_id)
+        
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.otb_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="OTB plan is immutable - workflow has progressed past OTB upload. No edits allowed.",
+            )
+    
+    async def check_range_is_mutable(self, season_id: UUID) -> None:
+        """
+        Check if range intent can be modified (updated/deleted).
+        
+        Range Intent is mutable ONLY when:
+        - Season is not locked
+        - Workflow has NOT progressed past range_uploaded step
+        """
+        await self.check_season_exists(season_id)
+        await self.check_not_locked(season_id)
+        
+        workflow = await self.get_workflow(season_id)
+        if workflow and workflow.range_uploaded:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Range intent is immutable - workflow has progressed past range upload. No edits allowed.",
+            )
+    
+    async def check_po_grn_is_mutable(self, season_id: UUID) -> None:
+        """
+        Check if PO/GRN can be modified (updated/deleted).
+        
+        PO/GRN is mutable ONLY when:
+        - Season is not locked
+        """
+        await self.check_season_exists(season_id)
+        await self.check_not_locked(season_id)
     
     async def update_workflow_step(
         self,

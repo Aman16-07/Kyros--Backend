@@ -11,6 +11,10 @@ from app.repositories.otb_repo import OTBPlanRepository
 from app.repositories.range_intent_repo import RangeIntentRepository
 from app.repositories.po_repo import PurchaseOrderRepository
 from app.repositories.grn_repo import GRNRecordRepository
+# Phase 2
+from app.repositories.otb_position_repo import OTBPositionRepository
+from app.repositories.otb_adjustment_repo import OTBAdjustmentRepository
+from app.repositories.range_architecture_repo import RangeArchitectureRepository
 
 __all__ = [
     "BaseRepository",
@@ -25,4 +29,8 @@ __all__ = [
     "RangeIntentRepository",
     "PurchaseOrderRepository",
     "GRNRecordRepository",
+    # Phase 2
+    "OTBPositionRepository",
+    "OTBAdjustmentRepository",
+    "RangeArchitectureRepository",
 ]

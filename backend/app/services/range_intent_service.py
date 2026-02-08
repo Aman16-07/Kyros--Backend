@@ -11,6 +11,7 @@ from app.models.range_intent import RangeIntent
 from app.models.season import SeasonStatus
 from app.repositories.range_intent_repo import RangeIntentRepository
 from app.schemas.range_intent import RangeIntentCreate, RangeIntentUpdate
+from app.services.audit_service import AuditService
 
 
 class RangeIntentService:
@@ -20,6 +21,7 @@ class RangeIntentService:
         self.session = session
         self.repo = RangeIntentRepository(session)
         self.guard = WorkflowGuard(session)
+        self.audit = AuditService(session)
     
     async def create_range_intent(self, data: RangeIntentCreate) -> RangeIntent:
         """Create a new range intent."""
@@ -76,6 +78,16 @@ class RangeIntentService:
             SeasonStatus.RANGE_UPLOADED,
         )
         
+        # Audit log the bulk upload
+        await self.audit.log_upload(
+            entity_type="RangeIntent",
+            entity_id=intents[0].season_id,
+            user_id=intents[0].uploaded_by,
+            record_count=len(created_intents),
+            description=f"Bulk uploaded {len(created_intents)} range intents",
+            season_id=intents[0].season_id,
+        )
+        
         return created_intents
     
     async def get_range_intent(self, intent_id: UUID) -> RangeIntent:
@@ -103,6 +115,7 @@ class RangeIntentService:
         self,
         intent_id: UUID,
         data: RangeIntentUpdate,
+        user_id: Optional[UUID] = None,
     ) -> RangeIntent:
         """Update a range intent."""
         intent = await self.repo.get_by_id(intent_id)
@@ -112,14 +125,31 @@ class RangeIntentService:
                 detail="Range intent not found",
             )
         
-        await self.guard.check_not_locked(intent.season_id)
+        # Check range intent is mutable (not locked AND workflow has not progressed past range upload)
+        await self.guard.check_range_is_mutable(intent.season_id)
+        
+        # Capture old data for audit
+        old_data = {
+            "core_percent": float(intent.core_percent) if intent.core_percent else None,
+            "fashion_percent": float(intent.fashion_percent) if intent.fashion_percent else None,
+        }
         
         update_data = data.model_dump(exclude_unset=True)
         updated_intent = await self.repo.update(intent_id, **update_data)
         
+        # Audit log the update
+        await self.audit.log_update(
+            entity_type="RangeIntent",
+            entity_id=intent_id,
+            user_id=user_id,
+            old_data=old_data,
+            new_data=update_data,
+            season_id=intent.season_id,
+        )
+        
         return updated_intent
     
-    async def delete_range_intent(self, intent_id: UUID) -> bool:
+    async def delete_range_intent(self, intent_id: UUID, user_id: Optional[UUID] = None) -> bool:
         """Delete a range intent."""
         intent = await self.repo.get_by_id(intent_id)
         if not intent:
@@ -128,6 +158,25 @@ class RangeIntentService:
                 detail="Range intent not found",
             )
         
-        await self.guard.check_not_locked(intent.season_id)
+        # Check range intent is mutable (not locked AND workflow has not progressed past range upload)
+        await self.guard.check_range_is_mutable(intent.season_id)
         
-        return await self.repo.delete(intent_id)
+        # Capture old data for audit
+        old_data = {
+            "id": str(intent.id),
+            "season_id": str(intent.season_id),
+            "category_id": str(intent.category_id) if intent.category_id else None,
+        }
+        
+        result = await self.repo.delete(intent_id)
+        
+        # Audit log the deletion
+        await self.audit.log_delete(
+            entity_type="RangeIntent",
+            entity_id=intent_id,
+            user_id=user_id,
+            old_data=old_data,
+            season_id=intent.season_id,
+        )
+        
+        return result

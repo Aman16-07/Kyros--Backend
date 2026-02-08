@@ -1,12 +1,13 @@
 """Purchase Orders API endpoints."""
 
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 
-from app.core.deps import DBSession
+from app.core.deps import DBSession, get_current_user
 from app.models.purchase_order import POSource
+from app.models.user import User
 from app.schemas.base import MessageResponse
 from app.schemas.po import (
     POSummary,
@@ -55,6 +56,79 @@ async def bulk_create_purchase_orders(
         "created": len(created),
         "errors": errors,
         "items": [PurchaseOrderResponse.model_validate(po) for po in created],
+    }
+
+
+@router.post(
+    "/preview",
+    response_model=dict,
+    summary="Preview purchase order upload without committing",
+)
+async def preview_purchase_orders(
+    data: PurchaseOrderBulkCreate,
+    db: DBSession,
+) -> dict:
+    """
+    Validate purchase order data without saving to database.
+    
+    Use this endpoint to preview the results of a bulk upload:
+    - Validates all records against schema
+    - Checks for duplicates
+    - Returns validation errors
+    - Does NOT commit any changes
+    
+    Returns:
+        - valid_count: Number of records that would be created
+        - duplicate_count: Number of duplicates found
+        - error_count: Number of validation errors
+        - errors: List of error messages
+        - preview: First 10 valid records for preview
+    """
+    from app.repositories.po_repo import PurchaseOrderRepository
+    
+    service = POIngestService(db)
+    po_repo = PurchaseOrderRepository(db)
+    
+    valid_records = []
+    duplicates = []
+    errors = []
+    
+    for idx, order_data in enumerate(data.orders):
+        try:
+            # Check for duplicate PO number
+            existing = await po_repo.get_by_po_number(order_data.po_number)
+            if existing:
+                duplicates.append({
+                    "row": idx + 1,
+                    "po_number": order_data.po_number,
+                    "message": f"PO {order_data.po_number} already exists",
+                })
+                continue
+            
+            # Validate data structure (schema validation already done by Pydantic)
+            valid_records.append({
+                "row": idx + 1,
+                "po_number": order_data.po_number,
+                "season_id": str(order_data.season_id),
+                "location_id": str(order_data.location_id),
+                "category_id": str(order_data.category_id) if order_data.category_id else None,
+                "po_value": float(order_data.po_value),
+                "order_date": order_data.order_date.isoformat() if order_data.order_date else None,
+                "supplier_name": order_data.supplier_name,
+            })
+        except Exception as e:
+            errors.append({
+                "row": idx + 1,
+                "message": str(e),
+            })
+    
+    return {
+        "valid_count": len(valid_records),
+        "duplicate_count": len(duplicates),
+        "error_count": len(errors),
+        "duplicates": duplicates,
+        "errors": errors,
+        "preview": valid_records[:10],  # First 10 records for preview
     }
 
 
@@ -128,15 +202,20 @@ async def get_purchase_order(
     "/{po_id}",
     response_model=PurchaseOrderResponse,
     summary="Update a purchase order",
+    description="""
+    Update a purchase order. Fails if the season is locked.
+    Locked seasons = all data is read-only.
+    """,
 )
 async def update_purchase_order(
     po_id: UUID,
     data: PurchaseOrderUpdate,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> PurchaseOrderResponse:
-    """Update a purchase order."""
+    """Update a purchase order. Fails if season is locked."""
     service = POIngestService(db)
-    po = await service.update_purchase_order(po_id, data)
+    po = await service.update_purchase_order(po_id, data, user_id=current_user.id)
     return PurchaseOrderResponse.model_validate(po)
 
 
@@ -144,11 +223,16 @@ async def update_purchase_order(
     "/{po_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a purchase order",
+    description="""
+    Delete a purchase order. Fails if the season is locked.
+    Locked seasons = all data is read-only.
+    """,
 )
 async def delete_purchase_order(
     po_id: UUID,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    """Delete a purchase order."""
+    """Delete a purchase order. Fails if season is locked."""
     service = POIngestService(db)
-    await service.delete_purchase_order(po_id)
+    await service.delete_purchase_order(po_id, user_id=current_user.id)

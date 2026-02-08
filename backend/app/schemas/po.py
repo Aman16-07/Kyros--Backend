@@ -1,12 +1,13 @@
 """Purchase Order schemas."""
 
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from pydantic import Field, field_validator
 
-from app.models.purchase_order import POSource
+from app.models.purchase_order import POSource, POStatus
 from app.schemas.base import BaseSchema, TimestampSchema, UUIDSchema
 
 
@@ -18,6 +19,9 @@ class PurchaseOrderBase(BaseSchema):
     location_id: UUID
     category_id: UUID
     po_value: Decimal = Field(..., ge=0, decimal_places=2)
+    order_date: Optional[date] = None
+    supplier_name: Optional[str] = Field(None, max_length=255)
+    status: POStatus = POStatus.DRAFT
     source: POSource
     
     @field_validator("po_value", mode="before")
@@ -39,6 +43,9 @@ class PurchaseOrderUpdate(BaseSchema):
     """Schema for updating a purchase order."""
     
     po_value: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    order_date: Optional[date] = None
+    supplier_name: Optional[str] = Field(None, max_length=255)
+    status: Optional[POStatus] = None
 
 
 class PurchaseOrderResponse(PurchaseOrderBase, UUIDSchema, TimestampSchema):

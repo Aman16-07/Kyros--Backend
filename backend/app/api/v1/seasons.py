@@ -1,12 +1,13 @@
 """Seasons API endpoints with workflow management."""
 
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.deps import DBSession
+from app.core.deps import DBSession, get_current_user
 from app.models.season import SeasonStatus
+from app.models.user import User
 from app.schemas.base import MessageResponse
 from app.schemas.season import (
     SeasonCreate,
@@ -15,6 +16,7 @@ from app.schemas.season import (
     SeasonUpdate,
     SeasonWithWorkflow,
     WorkflowResponse,
+    WorkflowStatusResponse,
 )
 from app.services.season_service import SeasonService
 from app.services.workflow_orchestrator import WorkflowOrchestrator
@@ -41,8 +43,13 @@ router = APIRouter(prefix="/seasons", tags=["Seasons"])
 async def create_season(
     data: SeasonCreate,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> SeasonResponse:
     """Create a new season with initial workflow state."""
+    # Inject current user as creator and company
+    data.created_by = current_user.id
+    data.company_id = current_user.company_id
+    
     orchestrator = WorkflowOrchestrator(db)
     season = await orchestrator.create_season(data)
     return SeasonResponse.model_validate(season)
@@ -55,13 +62,16 @@ async def create_season(
 )
 async def get_seasons(
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
     status_filter: Optional[SeasonStatus] = Query(None, alias="status", description="Filter by status"),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(100, ge=1, le=500, description="Max records to return"),
 ) -> SeasonListResponse:
-    """Get all seasons with optional filtering."""
+    """Get all seasons for the current user's company."""
     service = SeasonService(db)
-    seasons, total = await service.get_seasons(skip, limit, status_filter)
+    seasons, total = await service.get_seasons_by_company(
+        current_user.company_id, skip, limit, status_filter
+    )
     
     return SeasonListResponse(
         items=[SeasonResponse.model_validate(s) for s in seasons],
@@ -98,10 +108,20 @@ async def update_season(
     season_id: UUID,
     data: SeasonUpdate,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> SeasonResponse:
-    """Update a season."""
+    """Update a season. Fails if season is locked."""
     service = SeasonService(db)
-    season = await service.update_season(season_id, data)
+    
+    # Check if season is locked (immutable)
+    workflow = await service.get_workflow(season_id)
+    if workflow and workflow.locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Season is locked and cannot be modified. Locked seasons are read-only.",
+        )
+    
+    season = await service.update_season(season_id, data, user_id=current_user.id)
     return SeasonResponse.model_validate(season)
 
 
@@ -113,10 +133,20 @@ async def update_season(
 async def delete_season(
     season_id: UUID,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    """Delete a season and all related data."""
+    """Delete a season and all related data. Fails if season is locked."""
     service = SeasonService(db)
-    await service.delete_season(season_id)
+    
+    # Check if season is locked (immutable)
+    workflow = await service.get_workflow(season_id)
+    if workflow and workflow.locked:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Season is locked and cannot be deleted. Locked seasons are read-only.",
+        )
+    
+    await service.delete_season(season_id, user_id=current_user.id)
 
 
 @router.get(
@@ -272,13 +302,16 @@ async def lock_season(
 
 @router.get(
     "/{season_id}/workflow-status",
+    response_model=WorkflowStatusResponse,
     summary="Get complete workflow status",
-    description="Get detailed workflow status including current step and next action.",
+    description="Get detailed workflow status including current step, next action, and editability flags.",
 )
 async def get_workflow_status(
     season_id: UUID,
     db: DBSession,
-) -> dict:
-    """Get complete workflow status for a season."""
-    orchestrator = WorkflowOrchestrator(db)
-    return await orchestrator.get_workflow_status(season_id)
+) -> WorkflowStatusResponse:
+    """Get complete workflow status for a season including editability information."""
+    service = SeasonService(db)
+    workflow = await service.get_workflow(season_id)
+    workflow_response = WorkflowResponse.model_validate(workflow)
+    return WorkflowStatusResponse.from_workflow(workflow_response)

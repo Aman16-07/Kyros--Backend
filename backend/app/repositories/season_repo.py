@@ -3,7 +3,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -40,6 +40,41 @@ class SeasonRepository(BaseRepository[Season]):
             .limit(limit)
         )
         return list(result.scalars().all())
+    
+    async def get_by_company(
+        self,
+        company_id: Optional[UUID],
+        skip: int = 0,
+        limit: int = 100,
+        status_filter: Optional[SeasonStatus] = None,
+    ) -> list[Season]:
+        """Get all seasons for a specific company."""
+        query = select(Season).options(selectinload(Season.workflow))
+        if company_id:
+            query = query.where(Season.company_id == company_id)
+        else:
+            query = query.where(Season.company_id.is_(None))
+        if status_filter:
+            query = query.where(Season.status == status_filter)
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def count_by_company(
+        self,
+        company_id: Optional[UUID],
+        status_filter: Optional[SeasonStatus] = None,
+    ) -> int:
+        """Count seasons for a specific company."""
+        query = select(func.count(Season.id))
+        if company_id:
+            query = query.where(Season.company_id == company_id)
+        else:
+            query = query.where(Season.company_id.is_(None))
+        if status_filter:
+            query = query.where(Season.status == status_filter)
+        result = await self.session.execute(query)
+        return result.scalar_one()
     
     async def get_by_status(
         self,

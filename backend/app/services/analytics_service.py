@@ -140,7 +140,7 @@ class AnalyticsService:
         # Actual spend by month (from GRN)
         actual_query = (
             select(
-                func.date_trunc("month", GRNRecord.grn_date).label("month"),
+                func.strftime("%Y-%m-01", GRNRecord.grn_date).label("month"),
                 func.sum(GRNRecord.received_value).label("actual"),
             )
             .join(PurchaseOrder, GRNRecord.po_id == PurchaseOrder.id)
@@ -152,10 +152,18 @@ class AnalyticsService:
             actual_query = actual_query.where(Location.cluster_id == cluster_id)
         
         actual_by_month = await self.session.execute(
-            actual_query.group_by(func.date_trunc("month", GRNRecord.grn_date))
+            actual_query.group_by(func.strftime("%Y-%m-01", GRNRecord.grn_date))
         )
         
-        actual_data = {row.month.date() if row.month else None: row.actual for row in actual_by_month.all()}
+        actual_data = {}
+        for row in actual_by_month.all():
+            if row.month:
+                # strftime returns string "YYYY-MM-01", convert to date for consistency
+                from datetime import date as date_type
+                if isinstance(row.month, str):
+                    actual_data[date_type.fromisoformat(row.month)] = row.actual
+                else:
+                    actual_data[row.month.date() if hasattr(row.month, 'date') else row.month] = row.actual
         
         # Combine data
         all_months = set(budget_data.keys()) | {m for m in actual_data.keys() if m}
@@ -432,15 +440,16 @@ class AnalyticsService:
         # Get recent workflow changes
         recent_result = await self.session.execute(
             select(SeasonWorkflow)
-            .order_by(SeasonWorkflow.changed_at.desc())
+            .order_by(SeasonWorkflow.updated_at.desc())
             .limit(10)
         )
         recent_changes = [
             {
                 "season_id": str(wf.season_id),
-                "from_status": wf.from_status.value if wf.from_status else None,
-                "to_status": wf.to_status.value,
-                "changed_at": wf.changed_at.isoformat() if wf.changed_at else None,
+                "locked": wf.locked,
+                "otb_uploaded": wf.otb_uploaded,
+                "range_uploaded": wf.range_uploaded,
+                "updated_at": wf.updated_at.isoformat() if wf.updated_at else None,
             }
             for wf in recent_result.scalars().all()
         ]
@@ -475,3 +484,87 @@ class AnalyticsService:
         }
         
         return export_data
+
+    async def get_plan_vs_execution(self, season_id: UUID) -> dict:
+        """
+        Get plan vs execution analysis.
+        
+        Compares planned quantities from season plans with actual
+        purchased (POs) and received (GRNs) quantities by category.
+        """
+        from app.models.category import Category
+        
+        # Get planned values by category from season plans
+        plans_result = await self.session.execute(
+            select(
+                Category.id.label("category_id"),
+                Category.name.label("category"),
+                func.sum(SeasonPlan.planned_sales).label("planned_qty"),
+            )
+            .join(Category, SeasonPlan.category_id == Category.id)
+            .where(SeasonPlan.season_id == season_id)
+            .group_by(Category.id, Category.name)
+        )
+        plans_by_category = {str(row.category_id): {
+            "category": row.category,
+            "planned_qty": float(row.planned_qty or 0),
+        } for row in plans_result.all()}
+        
+        # Get PO values by category
+        po_result = await self.session.execute(
+            select(
+                Category.id.label("category_id"),
+                func.sum(PurchaseOrder.po_value).label("purchased_qty"),
+            )
+            .join(Category, PurchaseOrder.category_id == Category.id)
+            .where(PurchaseOrder.season_id == season_id)
+            .group_by(Category.id)
+        )
+        po_by_category = {str(row.category_id): float(row.purchased_qty or 0) 
+                          for row in po_result.all()}
+        
+        # Get GRN values by category (through POs)
+        grn_result = await self.session.execute(
+            select(
+                PurchaseOrder.category_id,
+                func.sum(GRNRecord.received_value).label("received_qty"),
+            )
+            .join(PurchaseOrder, GRNRecord.po_id == PurchaseOrder.id)
+            .where(PurchaseOrder.season_id == season_id)
+            .group_by(PurchaseOrder.category_id)
+        )
+        grn_by_category = {str(row.category_id): float(row.received_qty or 0) 
+                           for row in grn_result.all()}
+        
+        # Combine into items
+        items = []
+        for cat_id, plan_data in plans_by_category.items():
+            planned = plan_data["planned_qty"]
+            purchased = po_by_category.get(cat_id, 0)
+            received = grn_by_category.get(cat_id, 0)
+            variance = received - planned
+            
+            items.append({
+                "sku": f"CAT-{cat_id[:8]}",  # Use category ID as SKU for now
+                "category": plan_data["category"],
+                "planned_qty": planned,
+                "purchased_qty": purchased,
+                "received_qty": received,
+                "variance": variance,
+                "variance_explanation": (
+                    "Within tolerance" if abs(variance) < 0.01 * planned else
+                    "Over supplied" if variance > 0 else
+                    "Under supplied"
+                ) if planned > 0 else "No plan",
+            })
+        
+        return {
+            "season_id": str(season_id),
+            "items": items,
+            "summary": {
+                "total_planned": sum(i["planned_qty"] for i in items),
+                "total_purchased": sum(i["purchased_qty"] for i in items),
+                "total_received": sum(i["received_qty"] for i in items),
+                "categories_count": len(items),
+            },
+        }

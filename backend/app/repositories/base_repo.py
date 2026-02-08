@@ -93,3 +93,17 @@ class BaseRepository(Generic[ModelType]):
         for instance in instances:
             await self.session.refresh(instance)
         return instances
+    
+    async def get(self, id: UUID) -> Optional[ModelType]:
+        """Alias for get_by_id."""
+        return await self.get_by_id(id)
+    
+    async def list_all(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[ModelType], int]:
+        """List all records with count."""
+        total = await self.count()
+        items = await self.get_all(skip=skip, limit=limit)
+        return items, total

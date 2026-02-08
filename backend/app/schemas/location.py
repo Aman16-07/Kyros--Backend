@@ -21,6 +21,16 @@ class LocationCreate(LocationBase):
     
     cluster_id: Optional[UUID] = None
     # location_code will be auto-generated (16-character unique ID)
+    
+    # Address fields
+    address: Optional[str] = Field(None, max_length=500)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    country: Optional[str] = Field(None, max_length=100)
+    postal_code: Optional[str] = Field(None, max_length=20)
+    
+    # Activation status
+    is_active: bool = True
 
 
 class LocationUpdate(BaseSchema):
@@ -29,6 +39,16 @@ class LocationUpdate(BaseSchema):
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     type: Optional[LocationType] = None
     cluster_id: Optional[UUID] = None
+    
+    # Address fields
+    address: Optional[str] = Field(None, max_length=500)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=100)
+    country: Optional[str] = Field(None, max_length=100)
+    postal_code: Optional[str] = Field(None, max_length=20)
+    
+    # Activation status
+    is_active: Optional[bool] = None
 
 
 class LocationResponse(LocationBase, UUIDSchema, TimestampSchema):
@@ -36,6 +56,16 @@ class LocationResponse(LocationBase, UUIDSchema, TimestampSchema):
     
     location_code: str = Field(..., description="Unique 16-character location code")
     cluster_id: Optional[UUID] = None
+    
+    # Address fields
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
+    
+    # Activation status
+    is_active: bool = True
 
 
 class LocationWithCluster(LocationResponse):

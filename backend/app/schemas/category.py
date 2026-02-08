@@ -12,6 +12,8 @@ class CategoryBase(BaseSchema):
     """Base category schema."""
     
     name: str = Field(..., min_length=1, max_length=255)
+    code: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=2000)
     parent_id: Optional[UUID] = None
 
 
@@ -25,13 +27,16 @@ class CategoryUpdate(BaseSchema):
     """Schema for updating a category."""
     
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    code: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=2000)
     parent_id: Optional[UUID] = None
 
 
 class CategoryResponse(CategoryBase, UUIDSchema, TimestampSchema):
     """Schema for category response."""
     
-    pass
+    level: int = 0
+    path: Optional[str] = None
 
 
 class CategoryTree(CategoryResponse):

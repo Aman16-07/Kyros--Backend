@@ -45,7 +45,20 @@ class Season(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     
+    # Multi-tenant isolation
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
     # Relationships
+    company: Mapped["Company"] = relationship(
+        "Company",
+        back_populates="seasons",
+        foreign_keys=[company_id],
+    )
     creator: Mapped["User"] = relationship(
         "User",
         back_populates="created_seasons",
@@ -75,6 +88,22 @@ class Season(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         "SeasonWorkflow",
         back_populates="season",
         uselist=False,
+        cascade="all, delete-orphan",
+    )
+    # Phase 2 relationships
+    otb_positions: Mapped[list["OTBPosition"]] = relationship(
+        "OTBPosition",
+        back_populates="season",
+        cascade="all, delete-orphan",
+    )
+    otb_adjustments: Mapped[list["OTBAdjustment"]] = relationship(
+        "OTBAdjustment",
+        back_populates="season",
+        cascade="all, delete-orphan",
+    )
+    range_architectures: Mapped[list["RangeArchitecture"]] = relationship(
+        "RangeArchitecture",
+        back_populates="season",
         cascade="all, delete-orphan",
     )
     

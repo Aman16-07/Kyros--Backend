@@ -3,7 +3,7 @@
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +23,59 @@ class LocationRepository(BaseRepository[Location]):
             select(Location).where(Location.name == name)
         )
         return result.scalar_one_or_none()
+    
+    async def get_by_name_and_company(
+        self, name: str, company_id: Optional[UUID]
+    ) -> Optional[Location]:
+        """Get location by name within a specific company."""
+        query = select(Location).where(Location.name == name)
+        if company_id:
+            query = query.where(Location.company_id == company_id)
+        else:
+            query = query.where(Location.company_id.is_(None))
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+    
+    async def get_by_company(
+        self,
+        company_id: Optional[UUID],
+        location_type: Optional[LocationType] = None,
+        cluster_id: Optional[UUID] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Location]:
+        """Get all locations for a specific company with optional filters."""
+        query = select(Location)
+        if company_id:
+            query = query.where(Location.company_id == company_id)
+        else:
+            query = query.where(Location.company_id.is_(None))
+        if location_type:
+            query = query.where(Location.type == location_type)
+        if cluster_id:
+            query = query.where(Location.cluster_id == cluster_id)
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def count_by_company(
+        self,
+        company_id: Optional[UUID],
+        location_type: Optional[LocationType] = None,
+        cluster_id: Optional[UUID] = None,
+    ) -> int:
+        """Count locations for a specific company with optional filters."""
+        query = select(func.count(Location.id))
+        if company_id:
+            query = query.where(Location.company_id == company_id)
+        else:
+            query = query.where(Location.company_id.is_(None))
+        if location_type:
+            query = query.where(Location.type == location_type)
+        if cluster_id:
+            query = query.where(Location.cluster_id == cluster_id)
+        result = await self.session.execute(query)
+        return result.scalar_one()
     
     async def get_by_cluster(
         self,

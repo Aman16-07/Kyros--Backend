@@ -12,6 +12,7 @@ class ClusterBase(BaseSchema):
     """Base cluster schema."""
     
     name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
 
 
 class ClusterCreate(ClusterBase):
@@ -24,12 +25,15 @@ class ClusterUpdate(BaseSchema):
     """Schema for updating a cluster."""
     
     name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = Field(None, max_length=2000)
+    is_active: Optional[bool] = None
 
 
 class ClusterResponse(ClusterBase, UUIDSchema, TimestampSchema):
     """Schema for cluster response."""
     
-    pass
+    cluster_code: str
+    is_active: bool = True
 
 
 class ClusterWithLocations(ClusterResponse):

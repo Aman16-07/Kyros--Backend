@@ -18,16 +18,21 @@ class BaseSchema(BaseModel):
     )
 
 
-class TimestampSchema(BaseSchema):
-    """Schema with created_at timestamp."""
+class TimestampMixin(BaseModel):
+    """Mixin schema with created_at timestamp."""
     
     created_at: datetime
 
 
-class UUIDSchema(BaseSchema):
-    """Schema with UUID id."""
+class UUIDMixin(BaseModel):
+    """Mixin schema with UUID id."""
     
     id: UUID
+
+
+# Keep old names for backward compatibility
+TimestampSchema = TimestampMixin
+UUIDSchema = UUIDMixin
 
 
 # Generic types for pagination

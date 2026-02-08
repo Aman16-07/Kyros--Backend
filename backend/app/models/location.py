@@ -3,7 +3,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Enum, ForeignKey, String
+from sqlalchemy import Boolean, Enum, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -37,7 +37,30 @@ class Location(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=True,
     )
     
+    # Multi-tenant isolation
+    company_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    
+    # Address fields
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    state: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    
+    # Activation status
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    
     # Relationships
+    company: Mapped["Company"] = relationship(
+        "Company",
+        back_populates="locations",
+        foreign_keys=[company_id],
+    )
     cluster: Mapped["Cluster"] = relationship(
         "Cluster",
         back_populates="locations",

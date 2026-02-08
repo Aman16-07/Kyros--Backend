@@ -4,6 +4,8 @@ Kyros Backend Application - FastAPI Entry Point.
 A production-ready FastAPI application for retail planning and procurement management.
 """
 
+import signal
+import sys
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -16,7 +18,28 @@ from sqlalchemy import text
 from app.api.v1.router import router as api_v1_router
 from app.core.config import settings
 from app.core.database import engine
+from app.core.logging import get_logger, setup_logging
+from app.core.middleware import (
+    RequestIdMiddleware,
+    RequestLoggingMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.models.base import Base
+
+# Setup logging
+setup_logging()
+logger = get_logger(__name__)
+
+
+def handle_shutdown_signal(signum, frame):
+    """Handle graceful shutdown signals."""
+    logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+    sys.exit(0)
+
+
+# Register signal handlers for graceful shutdown
+signal.signal(signal.SIGTERM, handle_shutdown_signal)
+signal.signal(signal.SIGINT, handle_shutdown_signal)
 
 
 @asynccontextmanager
@@ -29,30 +52,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     - Shutdown: Dispose database connections
     """
     # Startup
+    logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    
     app.state.db_connected = False
     try:
-        # Create all tables (important for SQLite testing)
+        # Check if tables already exist (migrations already ran)
+        # Only create tables if they don't exist (e.g., for SQLite testing)
         async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        print("✅ Database tables created/verified")
+            # Use checkfirst=True to avoid errors when tables already exist
+            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
+        logger.info("Database tables created/verified")
         
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
-        print("✅ Database connection verified")
+        logger.info("Database connection verified")
         app.state.db_connected = True
     except Exception as e:
-        print(f"⚠️  Database connection failed: {e}")
-        print("ℹ️  Server starting without database - endpoints requiring DB will fail")
+        logger.warning(f"Database connection failed: {e}")
+        logger.info("Server starting without database - endpoints requiring DB will fail")
         # Don't raise - allow app to start for API docs viewing
+    
+    logger.info(f"Application started successfully on port 8000")
     
     yield
     
     # Shutdown
+    logger.info("Shutting down application...")
     try:
         await engine.dispose()
-        print("🔌 Database connections closed")
-    except Exception:
-        pass
+        logger.info("Database connections closed")
+    except Exception as e:
+        logger.error(f"Error closing database connections: {e}")
+    
+    logger.info("Application shutdown complete")
 
 
 # Initialize FastAPI application
@@ -74,17 +107,27 @@ app = FastAPI(
     - **GRN (Goods Receipt Notes)**: Track deliveries
     - **Analytics**: Dashboard and reporting
     """,
-    version="1.0.0",
+    version=settings.APP_VERSION,
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if not settings.is_production else None,
+    redoc_url="/redoc" if not settings.is_production else None,
     lifespan=lifespan,
 )
+
+# Add middleware (order matters - first added is last executed)
+# Security headers
+app.add_middleware(SecurityHeadersMiddleware)
+
+# Request logging
+app.add_middleware(RequestLoggingMiddleware)
+
+# Request ID tracking
+app.add_middleware(RequestIdMiddleware)
 
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

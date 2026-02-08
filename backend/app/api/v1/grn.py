@@ -1,12 +1,13 @@
 """GRN Records API endpoints."""
 
 from datetime import date
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.core.deps import DBSession
+from app.core.deps import DBSession, get_current_user
+from app.models.user import User
 from app.schemas.grn import (
     GRNRecordBulkCreate,
     GRNRecordCreate,
@@ -80,11 +81,8 @@ async def get_grn_records(
             start_date, end_date, skip, limit
         )
     else:
-        # Default to getting by PO if provided, else return error
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Please provide either po_id or both start_date and end_date",
-        )
+        # Get all records (no filter) - for dashboard views
+        records, total = await service.get_all_grn_records(skip, limit)
     
     return GRNRecordListResponse(
         items=[GRNRecordResponse.model_validate(grn) for grn in records],
@@ -138,15 +136,20 @@ async def get_grn_record(
     "/{grn_id}",
     response_model=GRNRecordResponse,
     summary="Update a GRN record",
+    description="""
+    Update a GRN record. Fails if the season is locked.
+    Locked seasons = all data is read-only.
+    """,
 )
 async def update_grn_record(
     grn_id: UUID,
     data: GRNRecordUpdate,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> GRNRecordResponse:
-    """Update a GRN record."""
+    """Update a GRN record. Fails if season is locked."""
     service = GRNIngestService(db)
-    grn = await service.update_grn_record(grn_id, data)
+    grn = await service.update_grn_record(grn_id, data, user_id=current_user.id)
     return GRNRecordResponse.model_validate(grn)
 
 
@@ -154,11 +157,16 @@ async def update_grn_record(
     "/{grn_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a GRN record",
+    description="""
+    Delete a GRN record. Fails if the season is locked.
+    Locked seasons = all data is read-only.
+    """,
 )
 async def delete_grn_record(
     grn_id: UUID,
     db: DBSession,
+    current_user: Annotated[User, Depends(get_current_user)],
 ) -> None:
-    """Delete a GRN record."""
+    """Delete a GRN record. Fails if season is locked."""
     service = GRNIngestService(db)
-    await service.delete_grn_record(grn_id)
+    await service.delete_grn_record(grn_id, user_id=current_user.id)

@@ -15,11 +15,15 @@ class SeasonPlanBase(BaseSchema):
     season_id: UUID
     location_id: UUID
     category_id: UUID
+    sku_id: Optional[str] = Field(None, max_length=100, description="SKU identifier")
     planned_sales: Decimal = Field(..., ge=0, decimal_places=2)
     planned_margin: Decimal = Field(..., decimal_places=2)
+    planned_units: Optional[int] = Field(None, ge=0, description="Planned unit quantity")
     inventory_turns: Decimal = Field(..., ge=0, decimal_places=2)
+    ly_sales: Optional[Decimal] = Field(None, ge=0, decimal_places=2, description="Last year sales")
+    lly_sales: Optional[Decimal] = Field(None, ge=0, decimal_places=2, description="Last last year sales")
     
-    @field_validator("planned_sales", "planned_margin", "inventory_turns", mode="before")
+    @field_validator("planned_sales", "planned_margin", "inventory_turns", "ly_sales", "lly_sales", mode="before")
     @classmethod
     def round_decimal(cls, v):
         """Round decimal to 2 places."""
@@ -41,7 +45,10 @@ class SeasonPlanUpdate(BaseSchema):
     
     planned_sales: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
     planned_margin: Optional[Decimal] = Field(None, decimal_places=2)
+    planned_units: Optional[int] = Field(None, ge=0)
     inventory_turns: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    ly_sales: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
+    lly_sales: Optional[Decimal] = Field(None, ge=0, decimal_places=2)
     approved: Optional[bool] = None
 
 

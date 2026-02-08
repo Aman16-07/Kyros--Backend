@@ -16,6 +16,7 @@ from app.models.otb_plan import OTBPlan
 from app.models.season import SeasonStatus
 from app.repositories.otb_repo import OTBPlanRepository
 from app.schemas.otb import OTBPlanCreate, OTBPlanUpdate, OTBSummary
+from app.services.audit_service import AuditService
 
 
 class OTBService:
@@ -25,6 +26,7 @@ class OTBService:
         self.session = session
         self.repo = OTBPlanRepository(session)
         self.guard = WorkflowGuard(session)
+        self.audit = AuditService(session)
     
     @staticmethod
     def calculate_otb(
@@ -130,6 +132,23 @@ class OTBService:
                 )
                 created_plans.append(plan)
         
+        # Update workflow to mark OTB as uploaded
+        await self.guard.update_workflow_step(
+            plans[0].season_id,
+            "otb_uploaded",
+            SeasonStatus.OTB_UPLOADED,
+        )
+        
+        # Audit log the bulk upload
+        await self.audit.log_upload(
+            entity_type="OTBPlan",
+            entity_id=plans[0].season_id,
+            user_id=plans[0].uploaded_by,
+            record_count=len(created_plans),
+            description=f"Bulk uploaded {len(created_plans)} OTB plans",
+            season_id=plans[0].season_id,
+        )
+        
         return created_plans
     
     async def get_otb_plan(self, plan_id: UUID) -> OTBPlan:
@@ -170,6 +189,7 @@ class OTBService:
         self,
         plan_id: UUID,
         data: OTBPlanUpdate,
+        user_id: Optional[UUID] = None,
     ) -> OTBPlan:
         """Update an OTB plan."""
         plan = await self.repo.get_by_id(plan_id)
@@ -179,14 +199,31 @@ class OTBService:
                 detail="OTB plan not found",
             )
         
-        await self.guard.check_not_locked(plan.season_id)
+        # Check OTB is mutable (not locked AND workflow has not progressed past OTB upload)
+        await self.guard.check_otb_is_mutable(plan.season_id)
+        
+        # Capture old data for audit
+        old_data = {
+            "planned_sales": float(plan.planned_sales) if plan.planned_sales else None,
+            "approved_spend_limit": float(plan.approved_spend_limit) if plan.approved_spend_limit else None,
+        }
         
         update_data = data.model_dump(exclude_unset=True)
         updated_plan = await self.repo.update(plan_id, **update_data)
         
+        # Audit log the update
+        await self.audit.log_update(
+            entity_type="OTBPlan",
+            entity_id=plan_id,
+            user_id=user_id,
+            old_data=old_data,
+            new_data=update_data,
+            season_id=plan.season_id,
+        )
+        
         return updated_plan
     
-    async def delete_otb_plan(self, plan_id: UUID) -> bool:
+    async def delete_otb_plan(self, plan_id: UUID, user_id: Optional[UUID] = None) -> bool:
         """Delete an OTB plan."""
         plan = await self.repo.get_by_id(plan_id)
         if not plan:
@@ -195,6 +232,25 @@ class OTBService:
                 detail="OTB plan not found",
             )
         
-        await self.guard.check_not_locked(plan.season_id)
+        # Check OTB is mutable (not locked AND workflow has not progressed past OTB upload)
+        await self.guard.check_otb_is_mutable(plan.season_id)
         
-        return await self.repo.delete(plan_id)
+        # Capture old data for audit
+        old_data = {
+            "id": str(plan.id),
+            "season_id": str(plan.season_id),
+            "month": plan.month.isoformat() if plan.month else None,
+        }
+        
+        result = await self.repo.delete(plan_id)
+        
+        # Audit log the deletion
+        await self.audit.log_delete(
+            entity_type="OTBPlan",
+            entity_id=plan_id,
+            user_id=user_id,
+            old_data=old_data,
+            season_id=plan.season_id,
+        )
+        
+        return result

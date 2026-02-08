@@ -28,6 +28,7 @@ from app.repositories.location_repo import LocationRepository
 from app.repositories.season_repo import SeasonRepository, WorkflowRepository
 from app.schemas.location import LocationCreate
 from app.schemas.season import SeasonCreate
+from app.services.audit_service import AuditService
 from app.utils.id_generators import generate_location_id, generate_season_id
 
 
@@ -49,6 +50,7 @@ class WorkflowOrchestrator:
         self.season_repo = SeasonRepository(session)
         self.workflow_repo = WorkflowRepository(session)
         self.location_repo = LocationRepository(session)
+        self.audit = AuditService(session)
     
     # =========================================================================
     # STEP 1: Create Season
@@ -82,6 +84,22 @@ class WorkflowOrchestrator:
             otb_uploaded=False,
             range_uploaded=False,
             locked=False,
+        )
+        
+        # Audit log the creation
+        await self.audit.log_create(
+            entity_type="Season",
+            entity_id=season.id,
+            user_id=data.created_by,
+            new_data={
+                "season_code": season_code,
+                "name": data.name,
+                "start_date": data.start_date.isoformat(),
+                "end_date": data.end_date.isoformat(),
+                "status": SeasonStatus.CREATED.value,
+            },
+            description=f"Created season via workflow: {data.name}",
+            season_id=season.id,
         )
         
         return season
@@ -149,7 +167,7 @@ class WorkflowOrchestrator:
         
         return created_locations
     
-    async def complete_location_definition(self, season_id: UUID) -> Season:
+    async def complete_location_definition(self, season_id: UUID, user_id: Optional[UUID] = None) -> Season:
         """
         Mark location definition as complete and advance workflow.
         
@@ -162,6 +180,15 @@ class WorkflowOrchestrator:
         
         # Update season status
         season = await self.season_repo.update_status(season_id, SeasonStatus.LOCATIONS_DEFINED)
+        
+        # Audit log the workflow transition
+        await self.audit.log_workflow_transition(
+            season_id=season_id,
+            user_id=user_id,
+            old_status=SeasonStatus.CREATED.value,
+            new_status=SeasonStatus.LOCATIONS_DEFINED.value,
+            description="Completed location definition step",
+        )
         
         return season
     
@@ -181,7 +208,7 @@ class WorkflowOrchestrator:
         await self._verify_season_state(season_id, SeasonStatus.LOCATIONS_DEFINED)
         return True
     
-    async def complete_plan_upload(self, season_id: UUID) -> Season:
+    async def complete_plan_upload(self, season_id: UUID, user_id: Optional[UUID] = None) -> Season:
         """
         Mark season plan upload as complete and advance workflow.
         
@@ -195,6 +222,15 @@ class WorkflowOrchestrator:
         
         # Update season status
         season = await self.season_repo.update_status(season_id, SeasonStatus.PLAN_UPLOADED)
+        
+        # Audit log the workflow transition
+        await self.audit.log_workflow_transition(
+            season_id=season_id,
+            user_id=user_id,
+            old_status=SeasonStatus.LOCATIONS_DEFINED.value,
+            new_status=SeasonStatus.PLAN_UPLOADED.value,
+            description="Completed season plan upload - plan is now IMMUTABLE",
+        )
         
         return season
     
@@ -220,7 +256,7 @@ class WorkflowOrchestrator:
         """
         return planned_sales + planned_closing_stock - opening_stock - on_order
     
-    async def complete_otb_upload(self, season_id: UUID) -> Season:
+    async def complete_otb_upload(self, season_id: UUID, user_id: Optional[UUID] = None) -> Season:
         """
         Mark OTB upload as complete and advance workflow.
         
@@ -234,6 +270,15 @@ class WorkflowOrchestrator:
         # Update season status
         season = await self.season_repo.update_status(season_id, SeasonStatus.OTB_UPLOADED)
         
+        # Audit log the workflow transition
+        await self.audit.log_workflow_transition(
+            season_id=season_id,
+            user_id=user_id,
+            old_status=SeasonStatus.PLAN_UPLOADED.value,
+            new_status=SeasonStatus.OTB_UPLOADED.value,
+            description="Completed OTB plan upload - OTB is now IMMUTABLE",
+        )
+        
         return season
     
     # =========================================================================
@@ -245,7 +290,7 @@ class WorkflowOrchestrator:
         await self._verify_season_state(season_id, SeasonStatus.OTB_UPLOADED)
         return True
     
-    async def complete_range_upload(self, season_id: UUID) -> Season:
+    async def complete_range_upload(self, season_id: UUID, user_id: Optional[UUID] = None) -> Season:
         """
         Mark range intent upload as complete and advance workflow.
         
@@ -258,6 +303,15 @@ class WorkflowOrchestrator:
         
         # Update season status
         season = await self.season_repo.update_status(season_id, SeasonStatus.RANGE_UPLOADED)
+        
+        # Audit log the workflow transition
+        await self.audit.log_workflow_transition(
+            season_id=season_id,
+            user_id=user_id,
+            old_status=SeasonStatus.OTB_UPLOADED.value,
+            new_status=SeasonStatus.RANGE_UPLOADED.value,
+            description="Completed range intent upload - range intent is now IMMUTABLE",
+        )
         
         return season
     
@@ -292,7 +346,7 @@ class WorkflowOrchestrator:
     # STEP 8: Lock Season (Read-Only Analytics View)
     # =========================================================================
     
-    async def lock_season(self, season_id: UUID) -> Season:
+    async def lock_season(self, season_id: UUID, user_id: Optional[UUID] = None) -> Season:
         """
         Lock the season for read-only analytics view.
         
@@ -306,6 +360,13 @@ class WorkflowOrchestrator:
         
         # Update season status
         season = await self.season_repo.update_status(season_id, SeasonStatus.LOCKED)
+        
+        # Audit log the lock action
+        await self.audit.log_lock(
+            season_id=season_id,
+            user_id=user_id,
+            description="Season locked for read-only analytics access. NO EDITING ALLOWED.",
+        )
         
         return season
     

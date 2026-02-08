@@ -87,6 +87,29 @@ from app.schemas.grn import (
     GRNRecordWithPO,
     GRNSummary,
 )
+# Phase 2
+from app.schemas.otb_position import (
+    OTBAdjustmentCreate,
+    OTBAdjustmentListResponse,
+    OTBAdjustmentResponse,
+    OTBAlertListResponse,
+    OTBConsumptionListResponse,
+    OTBDashboardResponse,
+    OTBForecastListResponse,
+    OTBPositionListResponse,
+    OTBPositionResponse,
+)
+from app.schemas.range_architecture import (
+    RangeApproveRequest,
+    RangeArchitectureBulkCreate,
+    RangeArchitectureCreate,
+    RangeArchitectureListResponse,
+    RangeArchitectureResponse,
+    RangeArchitectureUpdate,
+    RangeComparisonResponse,
+    RangeRejectRequest,
+    RangeSubmitRequest,
+)
 
 __all__ = [
     # Base
@@ -165,4 +188,24 @@ __all__ = [
     "GRNRecordUpdate",
     "GRNRecordWithPO",
     "GRNSummary",
+    # Phase 2 - OTB Management
+    "OTBAdjustmentCreate",
+    "OTBAdjustmentListResponse",
+    "OTBAdjustmentResponse",
+    "OTBAlertListResponse",
+    "OTBConsumptionListResponse",
+    "OTBDashboardResponse",
+    "OTBForecastListResponse",
+    "OTBPositionListResponse",
+    "OTBPositionResponse",
+    # Phase 2 - Range Architecture
+    "RangeApproveRequest",
+    "RangeArchitectureBulkCreate",
+    "RangeArchitectureCreate",
+    "RangeArchitectureListResponse",
+    "RangeArchitectureResponse",
+    "RangeArchitectureUpdate",
+    "RangeComparisonResponse",
+    "RangeRejectRequest",
+    "RangeSubmitRequest",
 ]

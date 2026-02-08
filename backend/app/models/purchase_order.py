@@ -2,9 +2,11 @@
 
 import enum
 import uuid
+from datetime import date
 from decimal import Decimal
+from typing import Optional
 
-from sqlalchemy import Enum, ForeignKey, Numeric, String
+from sqlalchemy import Date, Enum, ForeignKey, Numeric, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,6 +18,18 @@ class POSource(str, enum.Enum):
     
     CSV = "csv"
     API = "api"
+
+
+class POStatus(str, enum.Enum):
+    """Purchase order status enumeration."""
+    
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    CONFIRMED = "confirmed"
+    SHIPPED = "shipped"
+    PARTIAL = "partial"
+    COMPLETE = "complete"
+    CANCELLED = "cancelled"
 
 
 class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -47,6 +61,19 @@ class PurchaseOrder(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     po_value: Mapped[Decimal] = mapped_column(
         Numeric(precision=18, scale=2),
         nullable=False,
+    )
+    order_date: Mapped[Optional[date]] = mapped_column(
+        Date,
+        nullable=True,
+    )
+    supplier_name: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    status: Mapped[POStatus] = mapped_column(
+        Enum(POStatus, name="po_status", create_type=True),
+        nullable=False,
+        default=POStatus.DRAFT,
     )
     source: Mapped[POSource] = mapped_column(
         Enum(POSource, name="po_source", create_type=True),

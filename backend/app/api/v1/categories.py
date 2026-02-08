@@ -90,6 +90,28 @@ async def get_category_tree(
 
 
 @router.get(
+    "/lookup",
+    response_model=dict,
+    summary="Lookup categories by name",
+    description="Get a mapping of category names to their UUIDs. Useful for CSV uploads.",
+)
+async def lookup_categories_by_name(
+    db: DBSession,
+    names: list[str] = Query(..., description="List of category names to lookup"),
+) -> dict:
+    """Lookup category IDs by name."""
+    repo = CategoryRepository(db)
+    result = {}
+    for name in names:
+        category = await repo.get_by_name(name)
+        if category:
+            result[name] = str(category.id)
+        else:
+            result[name] = None
+    return result
+
+
+@router.get(
     "/{category_id}",
     response_model=CategoryResponse,
     summary="Get a category by ID",
