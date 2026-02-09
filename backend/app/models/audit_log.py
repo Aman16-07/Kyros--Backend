@@ -6,10 +6,14 @@ from enum import Enum
 from typing import Any, Optional
 
 from sqlalchemy import DateTime, Enum as SQLEnum, ForeignKey, JSON, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.database import is_sqlite
 from app.models.base import Base, UUIDPrimaryKeyMixin
+
+# Use JSON for SQLite, JSONB for PostgreSQL (better indexing/querying)
+_JSONType = JSON if is_sqlite else JSONB
 
 
 class AuditAction(str, Enum):
@@ -73,11 +77,11 @@ class AuditLog(Base, UUIDPrimaryKeyMixin):
     
     # Before and after state (for updates)
     old_data: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSON,
+        _JSONType,
         nullable=True,
     )
     new_data: Mapped[Optional[dict[str, Any]]] = mapped_column(
-        JSON,
+        _JSONType,
         nullable=True,
     )
     

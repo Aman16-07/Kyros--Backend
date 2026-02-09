@@ -9,6 +9,8 @@ from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.database import month_trunc
+
 from app.models.grn import GRNRecord
 from app.repositories.base_repo import BaseRepository
 
@@ -78,9 +80,9 @@ class GRNRecordRepository(BaseRepository[GRNRecord]):
         
         # Get by month breakdown
         month_query = select(
-            func.date_trunc("month", GRNRecord.grn_date).label("month"),
+            month_trunc(GRNRecord.grn_date).label("month"),
             func.sum(GRNRecord.received_value).label("value"),
-        ).group_by(func.date_trunc("month", GRNRecord.grn_date))
+        ).group_by(month_trunc(GRNRecord.grn_date))
         
         if po_ids:
             month_query = month_query.where(GRNRecord.po_id.in_(po_ids))

@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import month_trunc
 from app.models.cluster import Cluster
 from app.models.grn import GRNRecord
 from app.models.location import Location
@@ -140,7 +141,7 @@ class AnalyticsService:
         # Actual spend by month (from GRN)
         actual_query = (
             select(
-                func.strftime("%Y-%m-01", GRNRecord.grn_date).label("month"),
+                month_trunc(GRNRecord.grn_date).label("month"),
                 func.sum(GRNRecord.received_value).label("actual"),
             )
             .join(PurchaseOrder, GRNRecord.po_id == PurchaseOrder.id)
@@ -152,7 +153,7 @@ class AnalyticsService:
             actual_query = actual_query.where(Location.cluster_id == cluster_id)
         
         actual_by_month = await self.session.execute(
-            actual_query.group_by(func.strftime("%Y-%m-01", GRNRecord.grn_date))
+            actual_query.group_by(month_trunc(GRNRecord.grn_date))
         )
         
         actual_data = {}

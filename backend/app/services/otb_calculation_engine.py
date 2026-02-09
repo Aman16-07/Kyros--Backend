@@ -18,6 +18,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import month_trunc
 from app.models.otb_adjustment import AdjustmentStatus, OTBAdjustment
 from app.models.otb_plan import OTBPlan
 from app.models.otb_position import OTBPosition
@@ -574,7 +575,7 @@ class OTBCalculationEngine:
         query = (
             select(
                 PurchaseOrder.category_id,
-                func.strftime("%Y-%m-01", PurchaseOrder.order_date).label("month"),
+                month_trunc(PurchaseOrder.order_date).label("month"),
                 func.sum(PurchaseOrder.po_value).label("consumed"),
             )
             .where(
@@ -582,7 +583,7 @@ class OTBCalculationEngine:
                 PurchaseOrder.status.in_(active_statuses),
                 PurchaseOrder.order_date.is_not(None),
             )
-            .group_by(PurchaseOrder.category_id, func.strftime("%Y-%m-01", PurchaseOrder.order_date))
+            .group_by(PurchaseOrder.category_id, month_trunc(PurchaseOrder.order_date))
         )
         if category_id:
             query = query.where(PurchaseOrder.category_id == category_id)
@@ -590,7 +591,12 @@ class OTBCalculationEngine:
         result = await self.session.execute(query)
         consumed = {}
         for row in result.all():
-            month_date = row.month.date() if hasattr(row.month, 'date') else row.month
+            if isinstance(row.month, str):
+                month_date = date.fromisoformat(row.month)
+            elif hasattr(row.month, 'date'):
+                month_date = row.month.date()
+            else:
+                month_date = row.month
             if month_date:
                 consumed[(row.category_id, month_date)] = row.consumed or Decimal("0.00")
         return consumed

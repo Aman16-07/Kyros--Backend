@@ -61,7 +61,9 @@ RUN groupadd --gid 1000 appgroup \
 # Copy application code
 COPY --chown=appuser:appgroup . .
 
-# Switch to non-root user
+# Make entrypoint executable (run as root before switching user)
+USER root
+RUN chmod +x entrypoint.sh
 USER appuser
 
 # Expose port
@@ -70,6 +72,9 @@ EXPOSE 8000
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
+
+# Use entrypoint for migrations and seeding
+ENTRYPOINT ["./entrypoint.sh"]
 
 # Production command with gunicorn
 CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "-b", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-"]

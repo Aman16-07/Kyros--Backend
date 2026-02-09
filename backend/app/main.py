@@ -17,7 +17,7 @@ from sqlalchemy import text
 
 from app.api.v1.router import router as api_v1_router
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import engine, is_sqlite
 from app.core.logging import get_logger, setup_logging
 from app.core.middleware import (
     RequestIdMiddleware,
@@ -57,13 +57,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     
     app.state.db_connected = False
     try:
-        # Check if tables already exist (migrations already ran)
-        # Only create tables if they don't exist (e.g., for SQLite testing)
-        async with engine.begin() as conn:
-            # Use checkfirst=True to avoid errors when tables already exist
-            await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
-        logger.info("Database tables created/verified")
+        if is_sqlite:
+            # SQLite: create tables directly (no migrations)
+            async with engine.begin() as conn:
+                await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, checkfirst=True))
+            logger.info("Database tables created/verified (SQLite)")
         
+        # Verify connection
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
         logger.info("Database connection verified")

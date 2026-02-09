@@ -9,10 +9,19 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import NullPool
 
+from sqlalchemy import func as sa_func, text
+
 from app.core.config import settings
 
 # Check if using SQLite (for testing) or PostgreSQL
 is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+
+def month_trunc(column):
+    """Cross-DB month truncation: strftime for SQLite, date_trunc for PostgreSQL."""
+    if is_sqlite:
+        return sa_func.strftime("%Y-%m-01", column)
+    return sa_func.date_trunc(text("'month'"), column)
 
 # Create async engine with appropriate settings
 if is_sqlite:

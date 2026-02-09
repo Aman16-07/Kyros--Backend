@@ -1,338 +1,232 @@
 #!/usr/bin/env pwsh
-# Kyros Backend - CURL Test Script
-# Run: ./curl_tests.ps1
+# ============================================================
+#  KYROS BACKEND – curl E2E Tests (PowerShell)
+#  Covers: Auth, CRUD, Workflow, Phase 2 OTB Management,
+#          Phase 2 Range Architecture, Analytics, Lock
+# ============================================================
+$ErrorActionPreference = "Continue"
+$BASE = "http://localhost:8000"
+$API  = "$BASE/api/v1"
+$TOKEN = ""
+$PASS = 0; $FAIL = 0
+$BODY = "_curl_body.json"
 
-$BASE_URL = "http://localhost:8000"
-$API = "$BASE_URL/api/v1"
+function Write-Body { param([string]$J); [IO.File]::WriteAllText($BODY,$J,[Text.Encoding]::UTF8) }
 
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "KYROS BACKEND - CURL API TESTS" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "Base URL: $BASE_URL" -ForegroundColor Gray
-Write-Host ""
-
-# ============================================
-# HEALTH CHECK ENDPOINTS
-# ============================================
-Write-Host "1. HEALTH CHECK ENDPOINTS" -ForegroundColor Yellow
-Write-Host "-------------------------"
-
-Write-Host "`n  GET /" -ForegroundColor Green
-curl.exe -s $BASE_URL/
-
-Write-Host "`n`n  GET /health" -ForegroundColor Green
-curl.exe -s $BASE_URL/health
-
-Write-Host "`n`n  GET /ready" -ForegroundColor Green
-curl.exe -s $BASE_URL/ready
-
-# ============================================
-# SEASON ENDPOINTS
-# ============================================
-Write-Host "`n`n2. SEASON ENDPOINTS" -ForegroundColor Yellow
-Write-Host "-------------------"
-
-Write-Host "`n  GET /api/v1/seasons - List all seasons" -ForegroundColor Green
-curl.exe -s "$API/seasons"
-
-Write-Host "`n`n  POST /api/v1/seasons - Create a season" -ForegroundColor Green
-Write-Host "  Body: {name, start_date, end_date}" -ForegroundColor Gray
-@'
-{
-  "name": "Spring 2026",
-  "start_date": "2026-03-01",
-  "end_date": "2026-05-31"
+function T {
+    param([string]$M,[string]$U,[string]$B,[string]$D,[int]$E=200)
+    try {
+        $a = @("-s","-w","`n%{http_code}","-X",$M,"-H","Content-Type: application/json")
+        if ($script:TOKEN) { $a += @("-H","Authorization: Bearer $($script:TOKEN)") }
+        if ($B) { Write-Body $B; $a += @("-d","@$BODY") }
+        $a += $U
+        $r = & curl.exe @a 2>$null
+        $lines = $r -split "`n"
+        $sc = [int]$lines[-1]
+        $rb = ($lines[0..($lines.Length-2)] -join "`n")
+        if ($sc -eq $E -or ($E -eq 200 -and $sc -eq 201) -or ($E -eq 201 -and $sc -eq 200)) {
+            $script:PASS++; Write-Host "  PASS [$sc] $D" -Fore Green
+            return ($rb | ConvertFrom-Json -EA SilentlyContinue)
+        } else {
+            $script:FAIL++; Write-Host "  FAIL [$sc] $D (exp $E)" -Fore Red
+            Write-Host "       $($rb.Substring(0,[Math]::Min($rb.Length,200)))" -Fore DarkGray
+            return $null
+        }
+    } catch { $script:FAIL++; Write-Host "  FAIL $D - $_" -Fore Red; return $null }
 }
-'@ | Out-File -Encoding ascii -NoNewline temp_season.json
-curl.exe -s -X POST "$API/seasons" -H "Content-Type: application/json" -d "@temp_season.json"
 
-Write-Host "`n`n  GET /api/v1/seasons/{id} - Get season by ID" -ForegroundColor Green
-Write-Host "  (Replace {id} with actual UUID)" -ForegroundColor Gray
-# curl.exe -s "$API/seasons/YOUR-SEASON-UUID"
+Write-Host "======================================" -Fore Cyan
+Write-Host "  KYROS curl E2E TESTS  $(Get-Date -f 'yyyy-MM-dd HH:mm')" -Fore Cyan
+Write-Host "======================================" -Fore Cyan
 
-Write-Host "`n`n  GET /api/v1/seasons/{id}/workflow-status - Get workflow status" -ForegroundColor Green
-# curl.exe -s "$API/seasons/YOUR-SEASON-UUID/workflow-status"
+# ── 1. HEALTH ──
+Write-Host "`n[1] HEALTH" -Fore Yellow
+T -M GET -U "$BASE/"       -D "Root"
+T -M GET -U "$BASE/health" -D "Health"
+T -M GET -U "$BASE/ready"  -D "Ready"
 
-Write-Host "`n`n  POST /api/v1/seasons/{id}/define-locations - Start location definition" -ForegroundColor Green
-# curl.exe -s -X POST "$API/seasons/YOUR-SEASON-UUID/define-locations"
+# ── 2. AUTH ──
+Write-Host "`n[2] AUTH" -Fore Yellow
+$reg = T -M POST -U "$API/auth/register" -B '{"name":"Curl Admin","email":"curladmin@test.com","password":"Curl1234Ab"}' -D "Register" -E 201
+if ($reg -and $reg.tokens) { $TOKEN = $reg.tokens.access_token; Write-Host "       token acquired (register)" -Fore DarkCyan }
+$lgn = T -M POST -U "$API/auth/login" -B '{"email":"curladmin@test.com","password":"Curl1234Ab"}' -D "Login"
+if ($lgn -and $lgn.tokens) { $TOKEN = $lgn.tokens.access_token; Write-Host "       token acquired (login)" -Fore DarkCyan }
+T -M GET -U "$API/auth/me" -D "Me"
 
-Write-Host "`n`n  POST /api/v1/seasons/{id}/complete-plan-upload - Complete plan upload" -ForegroundColor Green
-# curl.exe -s -X POST "$API/seasons/YOUR-SEASON-UUID/complete-plan-upload"
+# ── 3. CLUSTERS ──
+Write-Host "`n[3] CLUSTERS" -Fore Yellow
+$cl = T -M POST -U "$API/clusters" -B '{"name":"West Region","description":"Western stores"}' -D "Create cluster" -E 201
+$CID = if ($cl) { $cl.id } else { $null }
+T -M GET -U "$API/clusters" -D "List clusters"
+if ($CID) { T -M GET -U "$API/clusters/$CID" -D "Get cluster" }
 
-Write-Host "`n`n  POST /api/v1/seasons/{id}/complete-otb-upload - Complete OTB upload" -ForegroundColor Green
-# curl.exe -s -X POST "$API/seasons/YOUR-SEASON-UUID/complete-otb-upload"
-
-Write-Host "`n`n  POST /api/v1/seasons/{id}/complete-range-upload - Complete range intent upload" -ForegroundColor Green
-# curl.exe -s -X POST "$API/seasons/YOUR-SEASON-UUID/complete-range-upload"
-
-Write-Host "`n`n  POST /api/v1/seasons/{id}/lock - Lock season (final step)" -ForegroundColor Green
-# curl.exe -s -X POST "$API/seasons/YOUR-SEASON-UUID/lock"
-
-# ============================================
-# LOCATION ENDPOINTS
-# ============================================
-Write-Host "`n`n3. LOCATION ENDPOINTS" -ForegroundColor Yellow
-Write-Host "---------------------"
-
-Write-Host "`n  GET /api/v1/locations - List all locations" -ForegroundColor Green
-curl.exe -s "$API/locations"
-
-Write-Host "`n`n  GET /api/v1/locations/stores - List stores only" -ForegroundColor Green
-curl.exe -s "$API/locations/stores"
-
-Write-Host "`n`n  GET /api/v1/locations/warehouses - List warehouses only" -ForegroundColor Green
-curl.exe -s "$API/locations/warehouses"
-
-Write-Host "`n`n  POST /api/v1/locations - Create a location" -ForegroundColor Green
-Write-Host "  Body: {name, type, cluster_id}" -ForegroundColor Gray
-@'
-{
-  "name": "Downtown Store",
-  "type": "store",
-  "cluster_id": "YOUR-CLUSTER-UUID",
-  "address": "123 Main St",
-  "city": "New York",
-  "country": "USA"
+# ── 4. LOCATIONS ──
+Write-Host "`n[4] LOCATIONS" -Fore Yellow
+$LID = $null
+if ($CID) {
+    $b = '{"name":"SF Store","type":"store","cluster_id":"'+$CID+'","city":"San Francisco","country":"USA"}'
+    $loc = T -M POST -U "$API/locations" -B $b -D "Create store" -E 201
+    $LID = if ($loc) { $loc.id } else { $null }
+    $b2 = '{"name":"Oakland WH","type":"warehouse","cluster_id":"'+$CID+'","city":"Oakland","country":"USA"}'
+    T -M POST -U "$API/locations" -B $b2 -D "Create warehouse" -E 201
 }
-'@ | Out-File -Encoding ascii -NoNewline temp_location.json
-# curl.exe -s -X POST "$API/locations" -H "Content-Type: application/json" -d "@temp_location.json"
+T -M GET -U "$API/locations"            -D "List locations"
+T -M GET -U "$API/locations/stores"     -D "List stores"
+T -M GET -U "$API/locations/warehouses" -D "List warehouses"
 
-Write-Host "`n`n  POST /api/v1/locations/bulk - Bulk create locations" -ForegroundColor Green
-# curl.exe -s -X POST "$API/locations/bulk" -H "Content-Type: application/json" -d "@locations_bulk.json"
-
-# ============================================
-# CLUSTER ENDPOINTS
-# ============================================
-Write-Host "`n`n4. CLUSTER ENDPOINTS" -ForegroundColor Yellow
-Write-Host "--------------------"
-
-Write-Host "`n  GET /api/v1/clusters - List all clusters" -ForegroundColor Green
-curl.exe -s "$API/clusters"
-
-Write-Host "`n`n  POST /api/v1/clusters - Create a cluster" -ForegroundColor Green
-@'
-{
-  "name": "Northeast Region",
-  "description": "Stores in the northeastern United States"
+# ── 5. CATEGORIES ──
+Write-Host "`n[5] CATEGORIES" -Fore Yellow
+$cat = T -M POST -U "$API/categories" -B '{"name":"Footwear","code":"FTW","description":"Shoes & boots"}' -D "Create root category" -E 201
+$CATID = if ($cat) { $cat.id } else { $null }
+$SCID = $null
+if ($CATID) {
+    $b = '{"name":"Sneakers","code":"SNK","description":"Athletic shoes","parent_id":"'+$CATID+'"}'
+    $sc = T -M POST -U "$API/categories" -B $b -D "Create child category" -E 201
+    $SCID = if ($sc) { $sc.id } else { $null }
 }
-'@ | Out-File -Encoding ascii -NoNewline temp_cluster.json
-curl.exe -s -X POST "$API/clusters" -H "Content-Type: application/json" -d "@temp_cluster.json"
+T -M GET -U "$API/categories"      -D "List categories"
+T -M GET -U "$API/categories/tree" -D "Category tree"
 
-# ============================================
-# CATEGORY ENDPOINTS
-# ============================================
-Write-Host "`n`n5. CATEGORY ENDPOINTS" -ForegroundColor Yellow
-Write-Host "---------------------"
+# ── 6. SEASONS + WORKFLOW ──
+Write-Host "`n[6] SEASONS" -Fore Yellow
+$sn = T -M POST -U "$API/seasons" -B '{"name":"Summer 2026","start_date":"2026-06-01","end_date":"2026-08-31"}' -D "Create season" -E 201
+$SID = if ($sn) { $sn.id } else { $null }
+T -M GET -U "$API/seasons" -D "List seasons"
+if ($SID) {
+    T -M GET -U "$API/seasons/$SID" -D "Get season"
+    T -M GET -U "$API/seasons/$SID/workflow-status" -D "Workflow status"
 
-Write-Host "`n  GET /api/v1/categories - List all categories" -ForegroundColor Green
-curl.exe -s "$API/categories"
+    Write-Host "  -- Step 1: Define Locations --" -Fore Magenta
+    T -M POST -U "$API/seasons/$SID/define-locations" -B "{}" -D "Define locations"
 
-Write-Host "`n`n  GET /api/v1/categories/tree - Get category tree" -ForegroundColor Green
-curl.exe -s "$API/categories/tree"
+    # ── 7. PLANS ──
+    Write-Host "`n[7] PLANS" -Fore Yellow
+    if ($LID -and $CATID) {
+        $b = '{"season_id":"'+$SID+'","location_id":"'+$LID+'","category_id":"'+$CATID+'","planned_sales":120000,"planned_margin":28,"inventory_turns":5}'
+        T -M POST -U "$API/plans" -B $b -D "Create plan" -E 201
+        T -M GET -U "$API/plans?season_id=$SID" -D "List plans"
+    }
 
-Write-Host "`n`n  POST /api/v1/categories - Create a category" -ForegroundColor Green
-@'
-{
-  "name": "Apparel",
-  "code": "APP",
-  "description": "Clothing and accessories"
+    Write-Host "  -- Step 2: Plan Upload --" -Fore Magenta
+    T -M POST -U "$API/seasons/$SID/complete-plan-upload" -B "{}" -D "Complete plan upload"
+
+    # ── 8. OTB (Phase 1 Static) ──
+    Write-Host "`n[8] OTB" -Fore Yellow
+    if ($LID -and $CATID) {
+        $b1 = '{"season_id":"'+$SID+'","location_id":"'+$LID+'","category_id":"'+$CATID+'","month":"2026-06-01","planned_sales":120000,"planned_closing_stock":60000,"opening_stock":35000,"on_order":12000,"approved_spend_limit":130000}'
+        T -M POST -U "$API/otb" -B $b1 -D "Create OTB Jun" -E 201
+        $b2 = '{"season_id":"'+$SID+'","location_id":"'+$LID+'","category_id":"'+$CATID+'","month":"2026-07-01","planned_sales":90000,"planned_closing_stock":45000,"opening_stock":60000,"on_order":8000,"approved_spend_limit":75000}'
+        T -M POST -U "$API/otb" -B $b2 -D "Create OTB Jul" -E 201
+        T -M GET -U "$API/otb?season_id=$SID"         -D "List OTB"
+        T -M GET -U "$API/otb/summary?season_id=$SID"  -D "OTB summary"
+    }
+
+    Write-Host "  -- Step 3: OTB Upload --" -Fore Magenta
+    T -M POST -U "$API/seasons/$SID/complete-otb-upload" -B "{}" -D "Complete OTB upload"
+
+    # ── 9. RANGE INTENT (Phase 1) ──
+    Write-Host "`n[9] RANGE INTENT" -Fore Yellow
+    if ($CATID) {
+        $b = '{"season_id":"'+$SID+'","category_id":"'+$CATID+'","core_percent":55,"fashion_percent":45,"price_band_mix":{"low":25,"mid":50,"high":25}}'
+        T -M POST -U "$API/range-intent" -B $b -D "Create range intent" -E 201
+        T -M GET -U "$API/range-intent?season_id=$SID" -D "List range intents"
+    }
+
+    Write-Host "  -- Step 4: Range Upload --" -Fore Magenta
+    T -M POST -U "$API/seasons/$SID/complete-range-upload" -B "{}" -D "Complete range upload"
+
+    # ── 10. PURCHASE ORDERS ──
+    Write-Host "`n[10] PURCHASE ORDERS" -Fore Yellow
+    $POID = $null
+    if ($LID -and $CATID) {
+        $b1 = '{"season_id":"'+$SID+'","location_id":"'+$LID+'","category_id":"'+$CATID+'","po_number":"PO-CRL-001","po_value":30000,"order_date":"2026-06-15","supplier_name":"Style Corp","source":"api","status":"confirmed"}'
+        $po = T -M POST -U "$API/purchase-orders" -B $b1 -D "Create PO 1" -E 201
+        $POID = if ($po) { $po.id } else { $null }
+        $b2 = '{"season_id":"'+$SID+'","location_id":"'+$LID+'","category_id":"'+$CATID+'","po_number":"PO-CRL-002","po_value":18000,"order_date":"2026-07-01","supplier_name":"Urban Threads","source":"api","status":"shipped"}'
+        T -M POST -U "$API/purchase-orders" -B $b2 -D "Create PO 2" -E 201
+        T -M GET -U "$API/purchase-orders?season_id=$SID"        -D "List POs"
+        T -M GET -U "$API/purchase-orders/summary?season_id=$SID" -D "PO summary"
+        T -M GET -U "$API/purchase-orders/by-number/PO-CRL-001"  -D "Get PO by number"
+    }
+
+    # ── 11. GRN ──
+    Write-Host "`n[11] GRN" -Fore Yellow
+    if ($POID) {
+        $b = '{"po_id":"'+$POID+'","grn_date":"2026-07-10","received_value":25000}'
+        T -M POST -U "$API/grn" -B $b -D "Create GRN" -E 201
+        T -M GET -U "$API/grn?po_id=$POID"            -D "List GRN"
+        T -M GET -U "$API/grn/fulfillment/$POID"       -D "Fulfillment"
+    }
+
+    # ── 12. PHASE 2: OTB MANAGEMENT ──
+    Write-Host "`n[12] OTB MANAGEMENT" -Fore Yellow
+    T -M POST -U "$API/otb-management/$SID/recalculate" -B "{}" -D "Recalculate"
+    T -M GET  -U "$API/otb-management/$SID/dashboard"   -D "Dashboard"
+    T -M GET  -U "$API/otb-management/$SID/position"    -D "Position"
+    T -M GET  -U "$API/otb-management/$SID/consumption" -D "Consumption"
+    T -M GET  -U "$API/otb-management/$SID/forecast"    -D "Forecast"
+    T -M GET  -U "$API/otb-management/$SID/alerts"      -D "Alerts"
+
+    if ($CATID -and $SCID) {
+        $b = '{"season_id":"'+$SID+'","from_category_id":"'+$CATID+'","to_category_id":"'+$SCID+'","amount":5000,"reason":"Budget shift"}'
+        $adj = T -M POST -U "$API/otb-management/$SID/adjust" -B $b -D "Create adjustment" -E 201
+        $ADJID = if ($adj) { $adj.id } else { $null }
+        T -M GET -U "$API/otb-management/$SID/adjustments" -D "List adjustments"
+        if ($ADJID) { T -M POST -U "$API/otb-management/adjustments/$ADJID/approve" -B "{}" -D "Approve adjustment" }
+    }
+
+    # ── 13. PHASE 2: RANGE ARCHITECTURE ──
+    Write-Host "`n[13] RANGE ARCHITECTURE" -Fore Yellow
+    $RAID = $null; $RAID2 = $null
+    if ($CATID) {
+        $b1 = '{"season_id":"'+$SID+'","category_id":"'+$CATID+'","price_band":"mid","fabric":"cotton","color_family":"blues","style_type":"core","planned_styles":15,"planned_options":45,"planned_depth":200}'
+        $ra = T -M POST -U "$API/range/$SID/architecture" -B $b1 -D "Create range arch 1" -E 201
+        $RAID = if ($ra) { $ra.id } else { $null }
+
+        $b2 = '{"season_id":"'+$SID+'","category_id":"'+$CATID+'","price_band":"high","fabric":"silk","color_family":"neutrals","style_type":"fashion","planned_styles":8,"planned_options":24,"planned_depth":100}'
+        $ra2 = T -M POST -U "$API/range/$SID/architecture" -B $b2 -D "Create range arch 2" -E 201
+        $RAID2 = if ($ra2) { $ra2.id } else { $null }
+
+        T -M GET -U "$API/range/$SID/architecture" -D "List range arch"
+        if ($RAID) {
+            T -M GET   -U "$API/range/$SID/architecture/$RAID" -D "Get range arch"
+            T -M PATCH -U "$API/range/$SID/architecture/$RAID" -B '{"planned_styles":18}' -D "Update range arch"
+        }
+        if ($RAID -and $RAID2) {
+            $bs = '{"range_ids":["'+$RAID+'","'+$RAID2+'"]}'
+            T -M POST -U "$API/range/$SID/submit"  -B $bs -D "Submit ranges"
+            $ba = '{"range_ids":["'+$RAID+'","'+$RAID2+'"],"comment":"Looks good"}'
+            T -M POST -U "$API/range/$SID/approve" -B $ba -D "Approve ranges"
+        }
+    }
+
+    $sn2 = T -M POST -U "$API/seasons" -B '{"name":"Winter 2025","start_date":"2025-12-01","end_date":"2026-02-28"}' -D "Create prior season" -E 201
+    $SID2 = if ($sn2) { $sn2.id } else { $null }
+    if ($SID2) { T -M GET -U "$API/range/$SID/compare/$SID2" -D "Compare ranges" }
+
+    # ── 14. ANALYTICS ──
+    Write-Host "`n[14] ANALYTICS" -Fore Yellow
+    T -M GET -U "$API/analytics/dashboard/$SID"          -D "Dashboard"
+    T -M GET -U "$API/analytics/budget-vs-actual/$SID"   -D "Budget vs actual"
+    T -M GET -U "$API/analytics/category-breakdown/$SID" -D "Category breakdown"
+    T -M GET -U "$API/analytics/po-status/$SID"          -D "PO status"
+    T -M GET -U "$API/analytics/workflow-status"          -D "All workflows"
+
+    # ── 15. LOCK ──
+    Write-Host "`n[15] LOCK SEASON" -Fore Yellow
+    T -M POST -U "$API/seasons/$SID/lock" -B "{}" -D "Lock season"
+    T -M GET  -U "$API/analytics/read-only-view/$SID"   -D "Read-only view"
+    T -M GET  -U "$API/seasons/$SID/workflow-status"     -D "Final workflow"
 }
-'@ | Out-File -Encoding ascii -NoNewline temp_category.json
-curl.exe -s -X POST "$API/categories" -H "Content-Type: application/json" -d "@temp_category.json"
 
-# ============================================
-# SEASON PLAN ENDPOINTS
-# ============================================
-Write-Host "`n`n6. SEASON PLAN ENDPOINTS" -ForegroundColor Yellow
-Write-Host "------------------------"
+# ── CLEANUP ──
+Remove-Item -Force $BODY -EA SilentlyContinue
 
-Write-Host "`n  GET /api/v1/plans?season_id={id} - List plans for a season" -ForegroundColor Green
-# curl.exe -s "$API/plans?season_id=YOUR-SEASON-UUID"
-
-Write-Host "`n`n  POST /api/v1/plans - Create a plan" -ForegroundColor Green
-@'
-{
-  "season_id": "YOUR-SEASON-UUID",
-  "location_id": "YOUR-LOCATION-UUID",
-  "category_id": "YOUR-CATEGORY-UUID",
-  "planned_quantity": 1000,
-  "planned_amount": 50000.00
-}
-'@ | Out-File -Encoding ascii -NoNewline temp_plan.json
-# curl.exe -s -X POST "$API/plans" -H "Content-Type: application/json" -d "@temp_plan.json"
-
-Write-Host "`n`n  POST /api/v1/plans/bulk - Bulk create plans" -ForegroundColor Green
-# curl.exe -s -X POST "$API/plans/bulk" -H "Content-Type: application/json" -d "@plans_bulk.json"
-
-Write-Host "`n`n  POST /api/v1/plans/approve - Approve plans (makes immutable)" -ForegroundColor Green
-# curl.exe -s -X POST "$API/plans/approve" -H "Content-Type: application/json" -d '{"plan_ids": ["uuid1", "uuid2"]}'
-
-# ============================================
-# OTB PLAN ENDPOINTS
-# ============================================
-Write-Host "`n`n7. OTB PLAN ENDPOINTS" -ForegroundColor Yellow
-Write-Host "---------------------"
-Write-Host "  Formula: OTB = Planned Sales + Planned Closing Stock - Opening Stock - On Order" -ForegroundColor Gray
-
-Write-Host "`n  GET /api/v1/otb?season_id={id} - List OTB plans for a season" -ForegroundColor Green
-# curl.exe -s "$API/otb?season_id=YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/otb/summary - Get OTB summary" -ForegroundColor Green
-curl.exe -s "$API/otb/summary"
-
-Write-Host "`n`n  POST /api/v1/otb - Create an OTB plan (auto-calculates OTB)" -ForegroundColor Green
-@'
-{
-  "season_id": "YOUR-SEASON-UUID",
-  "category_id": "YOUR-CATEGORY-UUID",
-  "location_id": "YOUR-LOCATION-UUID",
-  "planned_sales": 100000.00,
-  "planned_closing_stock": 50000.00,
-  "opening_stock": 30000.00,
-  "on_order": 10000.00
-}
-'@ | Out-File -Encoding ascii -NoNewline temp_otb.json
-# curl.exe -s -X POST "$API/otb" -H "Content-Type: application/json" -d "@temp_otb.json"
-
-# ============================================
-# RANGE INTENT ENDPOINTS
-# ============================================
-Write-Host "`n`n8. RANGE INTENT ENDPOINTS" -ForegroundColor Yellow
-Write-Host "-------------------------"
-
-Write-Host "`n  GET /api/v1/range-intent?season_id={id} - List range intents" -ForegroundColor Green
-# curl.exe -s "$API/range-intent?season_id=YOUR-SEASON-UUID"
-
-Write-Host "`n`n  POST /api/v1/range-intent - Create a range intent" -ForegroundColor Green
-@'
-{
-  "season_id": "YOUR-SEASON-UUID",
-  "category_id": "YOUR-CATEGORY-UUID",
-  "target_option_count": 50,
-  "target_sku_count": 200,
-  "price_band_low": 29.99,
-  "price_band_high": 99.99
-}
-'@ | Out-File -Encoding ascii -NoNewline temp_range.json
-# curl.exe -s -X POST "$API/range-intent" -H "Content-Type: application/json" -d "@temp_range.json"
-
-# ============================================
-# PURCHASE ORDER ENDPOINTS
-# ============================================
-Write-Host "`n`n9. PURCHASE ORDER ENDPOINTS" -ForegroundColor Yellow
-Write-Host "---------------------------"
-
-Write-Host "`n  GET /api/v1/purchase-orders - List all purchase orders" -ForegroundColor Green
-curl.exe -s "$API/purchase-orders"
-
-Write-Host "`n`n  GET /api/v1/purchase-orders/summary - Get PO summary" -ForegroundColor Green
-curl.exe -s "$API/purchase-orders/summary"
-
-Write-Host "`n`n  GET /api/v1/purchase-orders/by-number/{po_number} - Get PO by number" -ForegroundColor Green
-# curl.exe -s "$API/purchase-orders/by-number/PO-20260130-XXXXXX"
-
-Write-Host "`n`n  POST /api/v1/purchase-orders - Create a purchase order" -ForegroundColor Green
-@'
-{
-  "season_id": "YOUR-SEASON-UUID",
-  "supplier_id": "YOUR-SUPPLIER-UUID",
-  "category_id": "YOUR-CATEGORY-UUID",
-  "location_id": "YOUR-LOCATION-UUID",
-  "quantity": 500,
-  "unit_cost": 25.00,
-  "expected_delivery_date": "2026-04-15"
-}
-'@ | Out-File -Encoding ascii -NoNewline temp_po.json
-# curl.exe -s -X POST "$API/purchase-orders" -H "Content-Type: application/json" -d "@temp_po.json"
-
-# ============================================
-# GRN ENDPOINTS
-# ============================================
-Write-Host "`n`n10. GRN (GOODS RECEIVED NOTE) ENDPOINTS" -ForegroundColor Yellow
-Write-Host "---------------------------------------"
-
-Write-Host "`n  GET /api/v1/grn?po_id={id} - List GRN records for a PO" -ForegroundColor Green
-# curl.exe -s "$API/grn?po_id=YOUR-PO-UUID"
-
-Write-Host "`n`n  GET /api/v1/grn?start_date=2026-01-01&end_date=2026-12-31 - List by date range" -ForegroundColor Green
-# curl.exe -s "$API/grn?start_date=2026-01-01&end_date=2026-12-31"
-
-Write-Host "`n`n  GET /api/v1/grn/summary - Get GRN summary" -ForegroundColor Green
-curl.exe -s "$API/grn/summary"
-
-Write-Host "`n`n  GET /api/v1/grn/fulfillment/{po_id} - Get PO fulfillment status" -ForegroundColor Green
-# curl.exe -s "$API/grn/fulfillment/YOUR-PO-UUID"
-
-Write-Host "`n`n  POST /api/v1/grn - Create a GRN record" -ForegroundColor Green
-@'
-{
-  "po_id": "YOUR-PO-UUID",
-  "received_quantity": 450,
-  "received_date": "2026-04-14",
-  "quality_status": "accepted",
-  "notes": "Shipment received in good condition"
-}
-'@ | Out-File -Encoding ascii -NoNewline temp_grn.json
-# curl.exe -s -X POST "$API/grn" -H "Content-Type: application/json" -d "@temp_grn.json"
-
-# ============================================
-# ANALYTICS ENDPOINTS
-# ============================================
-Write-Host "`n`n11. ANALYTICS ENDPOINTS" -ForegroundColor Yellow
-Write-Host "-----------------------"
-
-Write-Host "`n  GET /api/v1/analytics/read-only-view/{season_id} - READ-ONLY ANALYTICS VIEW" -ForegroundColor Green
-Write-Host "  (Final workflow step - available after season is LOCKED)" -ForegroundColor Gray
-# curl.exe -s "$API/analytics/read-only-view/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/dashboard/{season_id} - Dashboard summary" -ForegroundColor Green
-# curl.exe -s "$API/analytics/dashboard/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/budget-vs-actual/{season_id} - Budget vs Actual" -ForegroundColor Green
-# curl.exe -s "$API/analytics/budget-vs-actual/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/category-breakdown/{season_id} - Category breakdown" -ForegroundColor Green
-# curl.exe -s "$API/analytics/category-breakdown/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/cluster-summary/{season_id} - Cluster summary" -ForegroundColor Green
-# curl.exe -s "$API/analytics/cluster-summary/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/location-performance/{season_id} - Location performance" -ForegroundColor Green
-# curl.exe -s "$API/analytics/location-performance/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/po-status/{season_id} - PO status" -ForegroundColor Green
-# curl.exe -s "$API/analytics/po-status/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/price-band-analysis/{season_id} - Price band analysis" -ForegroundColor Green
-# curl.exe -s "$API/analytics/price-band-analysis/YOUR-SEASON-UUID"
-
-Write-Host "`n`n  GET /api/v1/analytics/workflow-status - All workflows status" -ForegroundColor Green
-curl.exe -s "$API/analytics/workflow-status"
-
-Write-Host "`n`n  GET /api/v1/analytics/export/{season_id}?format=json - Export analytics" -ForegroundColor Green
-# curl.exe -s "$API/analytics/export/YOUR-SEASON-UUID?format=json"
-
-# ============================================
-# USER ENDPOINTS
-# ============================================
-Write-Host "`n`n12. USER ENDPOINTS" -ForegroundColor Yellow
-Write-Host "------------------"
-
-Write-Host "`n  GET /api/v1/users - List all users" -ForegroundColor Green
-curl.exe -s "$API/users"
-
-Write-Host "`n`n  GET /api/v1/users/{id} - Get user by ID" -ForegroundColor Green
-# curl.exe -s "$API/users/YOUR-USER-UUID"
-
-# ============================================
-# CLEANUP
-# ============================================
-Remove-Item -Force temp_*.json -ErrorAction SilentlyContinue
-
-Write-Host "`n`n============================================" -ForegroundColor Cyan
-Write-Host "CURL TESTING COMPLETE" -ForegroundColor Cyan
-Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "`nNote: DB-dependent endpoints will fail if PostgreSQL is not running." -ForegroundColor Gray
-Write-Host "Start PostgreSQL and run migrations for full functionality." -ForegroundColor Gray
-Write-Host "`nAPI Docs: $BASE_URL/docs" -ForegroundColor Cyan
-Write-Host "ReDoc: $BASE_URL/redoc" -ForegroundColor Cyan
+# ── RESULTS ──
+Write-Host "`n======================================" -Fore Cyan
+Write-Host "  Passed: $PASS" -Fore Green
+Write-Host "  Failed: $FAIL" -Fore $(if ($FAIL -gt 0){"Red"}else{"Green"})
+Write-Host "  Total:  $($PASS+$FAIL)" -Fore White
+Write-Host "======================================" -Fore Cyan
+if ($FAIL -eq 0) { Write-Host "  ALL TESTS PASSED!" -Fore Green }
+else              { Write-Host "  SOME TESTS FAILED" -Fore Red }
